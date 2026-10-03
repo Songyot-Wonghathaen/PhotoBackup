@@ -1,6 +1,7 @@
 package main
 
 import (
+	"PhotoVault/repository"
 	"embed"
 
 	"github.com/wailsapp/wails/v2"
@@ -12,6 +13,7 @@ import (
 var assets embed.FS
 
 func main() {
+
 	// Create an instance of the app structure
 	app := NewApp()
 
@@ -33,4 +35,13 @@ func main() {
 	if err != nil {
 		println("Error:", err.Error())
 	}
+
+	_, err = repository.NewDbConnection()
+	if err != nil {
+		println("Error connecting to database:", err.Error())
+		return
+	}
+
+	println("Database connection established successfully.")
+
 }

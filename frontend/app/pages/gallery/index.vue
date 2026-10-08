@@ -427,20 +427,25 @@ const displayedPhotos = computed(() => {
   background: #FFFFFF;
   border-radius: 14px;
   border: 1px solid #E5E7EB;
-  padding: 14px 18px;
-  margin-bottom: 20px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+  box-sizing: border-box;
 }
 
 .search-panel-card.compact-mode {
-  padding: 12px 18px;
-  min-height: 48px;
+  padding: 0 20px;
+  height: 74px;
+  min-height: 74px;
+  display: flex;
+  align-items: center;
 }
 
 .search-nav-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
 }
 
 .search-panel-card:not(.compact-mode) .search-nav-row {
@@ -453,13 +458,17 @@ const displayedPhotos = computed(() => {
   padding: 3px;
   border-radius: 10px;
   gap: 4px;
+  height: 41px;
+  box-sizing: border-box;
+  align-items: center;
 }
 
 .tab-btn {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 16px;
+  height: 35px;
+  padding: 0 16px;
   border-radius: 8px;
   border: none;
   background: transparent;
@@ -469,6 +478,7 @@ const displayedPhotos = computed(() => {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease-in-out;
+  box-sizing: border-box;
 }
 
 .tab-btn.active {
@@ -497,8 +507,10 @@ const displayedPhotos = computed(() => {
   color: #FFFFFF;
   font-size: 13px;
   font-weight: 600;
-  padding: 5px 12px;
-  border-radius: 9999px;
+  height: 31px;
+  padding: 0 12px;
+  border-radius: 15.5px;
+  box-sizing: border-box;
 }
 
 .btn-clear-tag {

@@ -1,11 +1,13 @@
 package main
 
 import (
-	"context"
-	"fmt"
-
 	modelGen "PhotoVault/model/model"
 	"PhotoVault/service"
+	"PhotoVault/utils"
+	"context"
+	"encoding/base64"
+	"fmt"
+	"sync"
 )
 
 // App struct
@@ -106,4 +108,44 @@ func (a *App) ListDBPhotos(destPath string) ([]*modelGen.Photo, error) {
 // DeletePhotos deletes files from destination and marks status as 'deleted' in DB (Feature 23 & 25)
 func (a *App) DeletePhotos(targets []string, isAll bool) (int, error) {
 	return a.backupService.Delete(targets, isAll)
+}
+
+// GetPhotoThumbnail returns base64 data URL for a single photo
+func (a *App) GetPhotoThumbnail(fullPath string) (string, error) {
+	bytes, err := utils.GetThumbnailBytes(fullPath, 280)
+	if err != nil {
+		return "", err
+	}
+	return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(bytes), nil
+}
+
+// GetPhotoThumbnails returns base64 data URLs for a batch of photo paths concurrently
+func (a *App) GetPhotoThumbnails(paths []string) map[string]string {
+	result := make(map[string]string)
+	if len(paths) == 0 {
+		return result
+	}
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+
+	for _, p := range paths {
+		wg.Add(1)
+		go func(path string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			bytes, err := utils.GetThumbnailBytes(path, 280)
+			if err == nil && len(bytes) > 0 {
+				b64 := "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(bytes)
+				mu.Lock()
+				result[path] = b64
+				mu.Unlock()
+			}
+		}(p)
+	}
+	wg.Wait()
+	return result
 }

@@ -224,14 +224,13 @@
               </div>
             </div>
 
-            <!-- Real Image Thumbnail -->
+            <!-- Real Image Thumbnail via Wails IPC Base64 / ObjectURL -->
             <img 
-              v-if="photo.full_path && !photo.load_failed"
-              :src="'/api/thumbnail?path=' + encodeURIComponent(photo.full_path)"
+              v-if="thumbnailMap[photo.full_path || '']"
+              :src="thumbnailMap[photo.full_path || '']"
               :alt="photo.filename"
               class="thumb-img"
               loading="lazy"
-              @error="photo.load_failed = true"
             />
 
             <!-- Stylized fallback if image loading fails or browser mode -->
@@ -438,6 +437,7 @@ const showMissingModal = ref(false)
 const showDestFilesModal = ref(false)
 const destFilesList = ref<any[]>([])
 const selectedFiles = ref<string[]>([])
+const thumbnailMap = ref<Record<string, string>>({})
 
 // Integrity Result (starts null - loaded live by backend CheckIntegrity)
 const integrityResult = ref<any>(null)
@@ -574,13 +574,17 @@ function handleBrowserFolderUpload(event: Event) {
 
   const destLower = new Set(destFilesList.value.map(f => f.filename.toLowerCase()))
 
-  sourceFiles.value = images.map(f => ({
-    filename: f.name,
-    size_bytes: f.size,
-    full_path: URL.createObjectURL(f),
-    is_duplicate: destLower.has(f.name.toLowerCase()),
-    load_failed: false
-  }))
+  sourceFiles.value = images.map(f => {
+    const url = URL.createObjectURL(f)
+    thumbnailMap.value[url] = url
+    return {
+      filename: f.name,
+      size_bytes: f.size,
+      full_path: url,
+      is_duplicate: destLower.has(f.name.toLowerCase()),
+      load_failed: false
+    }
+  })
   selectedFiles.value = sourceFiles.value.filter(f => !f.is_duplicate).map(f => f.filename)
 }
 
@@ -624,6 +628,20 @@ async function handleOpenDestList() {
   showDestFilesModal.value = true
 }
 
+async function loadThumbnails(paths: string[]) {
+  if (!paths || paths.length === 0) return
+  try {
+    if (typeof (window as any)?.go?.main?.App?.GetPhotoThumbnails === 'function') {
+      const thumbs = await (window as any).go.main.App.GetPhotoThumbnails(paths)
+      if (thumbs) {
+        thumbnailMap.value = { ...thumbnailMap.value, ...thumbs }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load thumbnails:', err)
+  }
+}
+
 async function refreshSourceFiles() {
   try {
     if (typeof (window as any)?.go?.main?.App?.ListSourceFileItems === 'function') {
@@ -649,6 +667,10 @@ async function refreshSourceFiles() {
           load_failed: false
         }))
         selectedFiles.value = sourceFiles.value.filter(f => !f.is_duplicate).map(f => f.filename)
+
+        // Load real thumbnails via Wails IPC
+        const pathsToLoad = sourceFiles.value.map(f => f.full_path).filter(Boolean) as string[]
+        loadThumbnails(pathsToLoad)
       } else {
         sourceFiles.value = []
         selectedFiles.value = []

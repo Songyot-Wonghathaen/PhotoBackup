@@ -7,3 +7,7 @@ frontend/dist
 .env.*
 !.env.example
 
+*.exe
+*.db-shm
+*.db-wal
+

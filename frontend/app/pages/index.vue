@@ -115,12 +115,12 @@
         </div>
 
         <div class="card-bottom-tags">
-          <span class="tag-pill tag-green">
+          <button class="tag-pill tag-green tag-btn" @click="handleOpenDestList" title="คลิกเพื่อดูรายการไฟล์จริงในโฟลเดอร์ปลายทาง (/list dest)">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <polyline points="20 6 9 17 4 12"/>
             </svg>
-            สำรองแล้ว {{ destCount }} รูป
-          </span>
+            สำรองแล้ว {{ destCount }} รูป (ดูไฟล์จริง)
+          </button>
           <span class="tag-pill tag-purple">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <ellipse cx="12" cy="5" rx="9" ry="3"/>
@@ -326,6 +326,48 @@
         </div>
       </div>
     </div>
+
+    <!-- Destination Actual Files Modal (Feature 10: /list dest) -->
+    <div v-if="showDestFilesModal" class="modal-backdrop" @click.self="showDestFilesModal = false">
+      <div class="modal-card modal-large">
+        <div class="modal-header">
+          <div class="modal-title-row">
+            <span class="modal-icon">📁</span>
+            <div>
+              <h3>รายการไฟล์จริงในโฟลเดอร์ปลายทาง (/list dest)</h3>
+              <p class="modal-subtitle">{{ destPath }} (พบ {{ destFilesList.length }} ไฟล์)</p>
+            </div>
+          </div>
+          <button class="btn-close" @click="showDestFilesModal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="destFilesList.length === 0" class="empty-modal-text">
+            ไม่พบไฟล์ในโฟลเดอร์ปลายทาง
+          </div>
+          <div v-else class="modal-table-wrap">
+            <table class="modal-table">
+              <thead>
+                <tr>
+                  <th>ชื่อไฟล์</th>
+                  <th>ขนาด</th>
+                  <th>เวลาแก้ไขล่าสุด</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in destFilesList" :key="item.filename">
+                  <td class="font-semibold">{{ item.filename }}</td>
+                  <td>{{ formatTotalSize(item.size_bytes) }}</td>
+                  <td class="text-muted">{{ item.mod_time || '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" @click="showDestFilesModal = false">ปิด</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -356,6 +398,8 @@ const destPath = ref(props.destPathProp || '~/Pictures/PhotoBackup')
 const destCount = ref(342)
 const isProcessing = ref(false)
 const showMissingModal = ref(false)
+const showDestFilesModal = ref(false)
+const destFilesList = ref<any[]>([])
 const selectedFiles = ref<string[]>(['IMG_2041.jpg', 'beach_trip.png', 'IMG_2043.heic'])
 
 // Integrity Result
@@ -503,17 +547,51 @@ async function handleSelectDest() {
   }
 }
 
+async function handleOpenDestList() {
+  if (!destPath.value) {
+    alert('กรุณาเลือกโฟลเดอร์ปลายทางก่อน!')
+    return
+  }
+  try {
+    if (typeof (window as any)?.go?.main?.App?.ListDestFileItems === 'function') {
+      const items = await (window as any).go.main.App.ListDestFileItems(destPath.value)
+      destFilesList.value = items || []
+    } else {
+      // Browser preview mode
+      destFilesList.value = [
+        { filename: 'IMG_2041.jpg', size_bytes: 3120000, mod_time: '2026-10-08 15:20:10' },
+        { filename: 'beach_trip.png', size_bytes: 4210000, mod_time: '2026-10-08 15:20:11' },
+        { filename: 'IMG_2043.heic', size_bytes: 2890000, mod_time: '2026-10-08 15:20:12' },
+        { filename: 'family.jpg', size_bytes: 5120000, mod_time: '2026-10-07 18:45:00' },
+        { filename: 'sunset.jpg', size_bytes: 3450000, mod_time: '2026-10-07 18:45:01' }
+      ]
+    }
+  } catch (err) {
+    console.error('Failed to list dest files:', err)
+  }
+  showDestFilesModal.value = true
+}
+
 async function refreshSourceFiles() {
   try {
     if (typeof (window as any)?.go?.main?.App?.ListSourceFileItems === 'function') {
       const items = await (window as any).go.main.App.ListSourceFileItems()
       if (items && Array.isArray(items)) {
+        // Feature 7: Detect duplicates with destination disk files
+        let destFiles: string[] = []
+        if (destPath.value && typeof (window as any)?.go?.main?.App?.ListDestPhotos === 'function') {
+          try {
+            destFiles = await (window as any).go.main.App.ListDestPhotos(destPath.value) || []
+          } catch (_) {}
+        }
+        const destLower = new Set((destFiles || []).map((f: string) => f.toLowerCase()))
+
         sourceFiles.value = items.map((item: any) => ({
           filename: item.filename,
           size_bytes: item.size_bytes,
-          is_duplicate: false
+          is_duplicate: destLower.has(item.filename.toLowerCase())
         }))
-        selectedFiles.value = sourceFiles.value.map(f => f.filename)
+        selectedFiles.value = sourceFiles.value.filter(f => !f.is_duplicate).map(f => f.filename)
       }
     }
   } catch (err) {
@@ -522,7 +600,19 @@ async function refreshSourceFiles() {
 }
 
 async function handleMoveSelected() {
-  if (selectedFiles.value.length === 0) return
+  // Feature 11: State Guard (Validate source & dest before processing)
+  if (!sourcePath.value) {
+    alert('กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการย้ายไฟล์!')
+    return
+  }
+  if (!destPath.value) {
+    alert('กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการย้ายไฟล์!')
+    return
+  }
+  if (selectedFiles.value.length === 0) {
+    alert('กรุณาเลือกรูปภาพอย่างน้อย 1 ไฟล์ที่ต้องการย้าย!')
+    return
+  }
   isProcessing.value = true
   try {
     if (typeof (window as any)?.go?.main?.App?.MovePhotos === 'function') {
@@ -533,6 +623,7 @@ async function handleMoveSelected() {
         integrityResult.value = await (window as any).go.main.App.CheckIntegrity(destPath.value)
         destCount.value = integrityResult.value.total_disk
       }
+      alert(`สำรองรูปภาพที่เลือกสำเร็จ ${summary.moved_files} ไฟล์ (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`)
     } else {
       // Browser preview demo mode
       lastSummary.value = {
@@ -552,6 +643,19 @@ async function handleMoveSelected() {
 }
 
 async function handleMoveAll() {
+  // Feature 11: State Guard (Validate source & dest before processing)
+  if (!sourcePath.value) {
+    alert('กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการสำรองข้อมูล!')
+    return
+  }
+  if (!destPath.value) {
+    alert('กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการสำรองข้อมูล!')
+    return
+  }
+  if (sourceFiles.value.length === 0) {
+    alert('ไม่พบรูปภาพในโฟลเดอร์ต้นทางที่จะสำรอง!')
+    return
+  }
   isProcessing.value = true
   try {
     if (typeof (window as any)?.go?.main?.App?.MovePhotos === 'function') {
@@ -562,6 +666,7 @@ async function handleMoveAll() {
         integrityResult.value = await (window as any).go.main.App.CheckIntegrity(destPath.value)
         destCount.value = integrityResult.value.total_disk
       }
+      alert(`สำรองรูปภาพทั้งหมดสำเร็จ ${summary.moved_files} ไฟล์ (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`)
     } else {
       // Browser preview demo mode
       lastSummary.value = {
@@ -1294,5 +1399,65 @@ onMounted(async () => {
   color: #374151;
   font-size: 13px;
   cursor: pointer;
+}
+
+.tag-btn {
+  border: none;
+  cursor: pointer;
+  transition: transform 0.1s, opacity 0.15s;
+}
+
+.tag-btn:hover {
+  opacity: 0.88;
+  transform: translateY(-1px);
+}
+
+.modal-large {
+  max-width: 620px;
+  width: 90%;
+}
+
+.modal-subtitle {
+  font-size: 12px;
+  color: #6B7280;
+  margin: 2px 0 0 0;
+  font-family: monospace;
+}
+
+.modal-table-wrap {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid #E5E7EB;
+  border-radius: 8px;
+}
+
+.modal-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.modal-table th {
+  background: #F9FAFB;
+  padding: 10px 14px;
+  font-weight: 600;
+  color: #4B5563;
+  border-bottom: 1px solid #E5E7EB;
+  position: sticky;
+  top: 0;
+}
+
+.modal-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #F3F4F6;
+  color: #374151;
+}
+
+.empty-modal-text {
+  text-align: center;
+  padding: 24px;
+  color: #9CA3AF;
+  font-size: 13px;
 }
 </style>

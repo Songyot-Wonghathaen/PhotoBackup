@@ -5,8 +5,7 @@
 - หน้าหลักเริ่มต้น:
   - `pages/index.vue` -> เส้นทาง `/` (หน้าหลักเริ่มต้น: สำรองรูปภาพ Part B)
 - หน้าจอระบบอื่น ๆ ต้องสร้างเป็นโฟลเดอร์ย่อยและมีไฟล์ `index.vue` เสมอ (Sub-folder Route):
-  - `pages/gallery/index.vue` -> เส้นทาง `/gallery` (หน้าแกลเลอรีคลังภาพ)
-  - `pages/search/index.vue` -> เส้นทาง `/search` (หน้าค้นหา & Tag Cloud)
+  - `pages/gallery/index.vue` -> เส้นทาง `/gallery` (หน้าแกลเลอรี & ค้นหา)
   - `pages/history/index.vue` -> เส้นทาง `/history` (หน้าประวัติ & ตรวจสอบ)
   - `pages/settings/index.vue` -> เส้นทาง `/settings` (หน้าตั้งค่า)
   - เส้นทางแบบ Dynamic Parameter:

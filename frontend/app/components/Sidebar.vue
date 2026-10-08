@@ -12,12 +12,13 @@
       <span class="brand-title">PhotoVault</span>
     </div>
 
-    <!-- Navigation Menu -->
+    <!-- Navigation Menu via NuxtLink Routing -->
     <nav class="nav-menu">
-      <button 
+      <NuxtLink 
+        to="/" 
         class="nav-item" 
-        :class="{ active: currentTab === 'backup' }"
-        @click="$emit('select-tab', 'backup')"
+        active-class="active"
+        exact-active-class="active"
         title="สำรองรูปภาพ (ระบบหลัก Part B)"
       >
         <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -26,13 +27,13 @@
           <line x1="12" y1="3" x2="12" y2="15"/>
         </svg>
         <span>สำรองรูปภาพ</span>
-      </button>
+      </NuxtLink>
 
-      <!-- Mock navigation items for other team members -->
-      <button 
+      <!-- Mock navigation items for teammates via NuxtLink Routing -->
+      <NuxtLink 
+        to="/gallery" 
         class="nav-item mock-item" 
-        :class="{ active: currentTab === 'gallery' }"
-        @click="$emit('select-tab', 'gallery')"
+        active-class="active"
         title="ฟีเจอร์ส่วนของเพื่อน (UI Mockup)"
       >
         <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -42,12 +43,12 @@
           <rect x="3" y="14" width="7" height="7"/>
         </svg>
         <span>แกลเลอรี & ค้นหา</span>
-      </button>
+      </NuxtLink>
 
-      <button 
+      <NuxtLink 
+        to="/history" 
         class="nav-item mock-item" 
-        :class="{ active: currentTab === 'history' }"
-        @click="$emit('select-tab', 'history')"
+        active-class="active"
         title="ฟีเจอร์ส่วนของเพื่อน (UI Mockup)"
       >
         <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -55,12 +56,12 @@
           <polyline points="12 6 12 12 16 14"/>
         </svg>
         <span>ประวัติ & ตรวจสอบ</span>
-      </button>
+      </NuxtLink>
 
-      <button 
+      <NuxtLink 
+        to="/settings" 
         class="nav-item mock-item" 
-        :class="{ active: currentTab === 'settings' }"
-        @click="$emit('select-tab', 'settings')"
+        active-class="active"
         title="การตั้งค่าระบบ"
       >
         <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -68,7 +69,7 @@
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
         </svg>
         <span>ตั้งค่า</span>
-      </button>
+      </NuxtLink>
     </nav>
 
     <!-- Bottom Database Info Card -->
@@ -97,18 +98,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-const props = withDefaults(
-  defineProps<{
-    destPath?: string
-    currentTab?: string
-  }>(),
-  {
-    currentTab: 'backup'
-  }
-)
-
-defineEmits<{
-  (e: 'select-tab', tab: string): void
+const props = defineProps<{
+  destPath?: string
 }>()
 
 const displayDest = computed(() => {
@@ -183,7 +174,9 @@ const displayDest = computed(() => {
   font-weight: 500;
   cursor: pointer;
   text-align: left;
+  text-decoration: none;
   transition: all 0.15s ease-in-out;
+  box-sizing: border-box;
 }
 
 .nav-item:hover {

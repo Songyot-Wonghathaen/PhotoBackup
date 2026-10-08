@@ -1,6 +1,45 @@
-# กฎระเบียบและข้อกำหนดการพัฒนาโปรเจกต์ PhotoVault
+# กฎระเบียบและแนวทางการพัฒนา PhotoVault (PhotoBackup)
 
-## 1. แผนงานและรายการฟีเจอร์ทั้งหมด (Feature Roadmap & Ownership)
+## 1. กฎเหล็กการเปลี่ยนหน้าด้วย Routing (Strict Routing Rule)
+**การนำทางและเปลี่ยนหน้าจอทั้งหมด ต้องใช้ระบบ File-based Routing ของ Nuxt ตามที่เอกสารการเรียนสอนอย่างเคร่งครัด**:
+- ทุกหน้าจอต้องสร้างเป็นไฟล์ `.vue` ภายใต้โฟลเดอร์ `frontend/app/pages/`
+  - `pages/index.vue` -> เส้นทาง `/` (หน้าหลักเริ่มต้น: สำรองรูปภาพ Part B)
+  - `pages/gallery.vue` -> เส้นทาง `/gallery` (หน้าแกลเลอรี & ค้นหา)
+  - `pages/history.vue` -> เส้นทาง `/history` (หน้าประวัติ & ตรวจสอบ)
+  - `pages/settings.vue` -> เส้นทาง `/settings` (หน้าตั้งค่า)
+- **การเปลี่ยนหน้าต้องใช้แท็ก `<NuxtLink to="...">`** สำหรับการนำทางแบบ Client-side Navigation เพื่อความลื่นไหลและไม่ต้องรีเฟรชหน้าจอ (ห้ามสลับแท็บด้วย state ธรรมดาโดยไม่มี route)
+- ใน `app.vue` ต้องมีแท็ก `<NuxtPage />` (ครอบด้วย `<NuxtLayout>` ร่วมกับ Layout ใน `layouts/default.vue`)
+- ชื่อไฟล์และโฟลเดอร์ภายใต้ `pages` ต้องเป็นตัวพิมพ์เล็ก (lowercase/kebab-case) เสมอ
+
+---
+
+## 2. โครงสร้างโฟลเดอร์ Nuxt 4 (Strict Architecture)
+```text
+root/
+├── app/
+│   ├── assets/        # Processed static assets (CSS, fonts, images)
+│   ├── components/    # Reusable Vue components (Auto-imported)
+│   ├── composables/   # Custom Composition API hooks (useBackup.ts)
+│   ├── layouts/       # Shared UI layouts (layouts/default.vue)
+│   ├── middleware/    # Navigation middleware
+│   ├── pages/         # Page routes (index.vue, gallery.vue, history.vue, settings.vue)
+│   ├── plugins/       # Vue plugins & runtime libraries
+│   ├── utils/         # Helper functions (formatters)
+│   ├── app.vue        # Root component (<NuxtLayout><NuxtPage /></NuxtLayout>)
+│   ├── error.vue      # Custom error UI page
+│   └── app.config.ts  # Reactive app-level configuration
+├── server/            # Backend server routes
+├── public/            # Static files (favicon.ico, robots.txt)
+├── modules/           # Local Nuxt modules
+├── nuxt.config.ts     # Config หลัก (ssr: false, nitro.output.publicDir: 'dist')
+├── package.json       # Dependencies & Scripts
+├── tsconfig.json      # TypeScript configuration
+└── .nuxtignore        # Ignore patterns
+```
+
+---
+
+## 3. แผนงานและรายการฟีเจอร์ทั้งหมด (Feature Roadmap & Ownership)
 
 ### A. โครงโปรเจกต์และฐานข้อมูล
 - [x] ตั้งโปรเจกต์ Wails + Nuxt ให้รันได้บน Windows และ macOS
@@ -46,31 +85,7 @@
 
 ---
 
-## 2. โครงสร้างโฟลเดอร์ Nuxt 4 (Strict Folder Structure)
-```text
-root/
-├── app/
-│   ├── assets/        # CSS, fonts, styles
-│   ├── components/    # Reusable Vue components
-│   ├── composables/   # Custom composition API hooks
-│   ├── layouts/       # Shared UI layouts
-│   ├── middleware/    # Navigation middleware
-│   ├── pages/         # Page routes
-│   ├── plugins/       # Plugins
-│   ├── utils/         # Helper functions
-│   ├── app.vue        # Root component (<NuxtLayout><NuxtPage /></NuxtLayout>)
-│   ├── error.vue      # Error page UI
-│   └── app.config.ts  # Reactive app config
-├── server/
-├── public/
-├── modules/
-├── nuxt.config.ts
-└── package.json
-```
-
----
-
-## 3. กฎความร่วมมือในทีม
-- Part B คือระบบจริงที่เราพัฒนา ส่วน Part C, D, E ทำเป็น UI Mockup เพื่อรอเพื่อน
-- ห้ามดัดแปลงตารางฐานข้อมูล 3 ตารางหลัก (`photos`, `tags`, `photo_tags`)
-- ทำงานและ push การเปลี่ยนแปลงขึ้น Branch `featureB` เท่านั้น
+## 4. กฎความร่วมมือในทีมและการควบคุมเวอร์ชัน (Git Rules)
+- Part B พัฒนาระบบจริง ส่วน Part C, D, E ทำเป็น UI Mockup รอเพื่อน
+- ห้ามดัดแปลงหรือลบ 3 ตารางในฐานข้อมูล
+- ทำงานและ Push การเปลี่ยนแปลงขึ้น Branch **`featureB`** เท่านั้น

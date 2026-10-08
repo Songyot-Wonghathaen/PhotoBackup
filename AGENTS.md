@@ -1,17 +1,50 @@
-# กฎระเบียบ ข้อกำหนด และโครงสร้างสถาปัตยกรรม PhotoVault
+# กฎระเบียบและแนวทางการพัฒนา PhotoVault (PhotoBackup)
 
-เอกสารนี้เป็นข้อกำหนดและกฎอย่างเคร่งครัดสำหรับการพัฒนาแอปพลิเคชัน PhotoVault (Wails + Nuxt 4 + SQLite GORM)
+## 1. กฎเหล็กการเปลี่ยนหน้าด้วย Routing (Strict Routing Rule)
+**การนำทางและเปลี่ยนหน้าจอทั้งหมด ต้องใช้ระบบ File-based Routing ของ Nuxt ตามที่เอกสารการเรียนสอนอย่างเคร่งครัด**:
+- ทุกหน้าจอต้องสร้างเป็นไฟล์ `.vue` ภายใต้โฟลเดอร์ `frontend/app/pages/`
+  - `pages/index.vue` -> เส้นทาง `/` (หน้าหลักเริ่มต้น: สำรองรูปภาพ Part B)
+  - `pages/gallery.vue` -> เส้นทาง `/gallery` (หน้าแกลเลอรี & ค้นหา)
+  - `pages/history.vue` -> เส้นทาง `/history` (หน้าประวัติ & ตรวจสอบ)
+  - `pages/settings.vue` -> เส้นทาง `/settings` (หน้าตั้งค่า)
+- **การเปลี่ยนหน้าต้องใช้แท็ก `<NuxtLink to="...">`** สำหรับการนำทางแบบ Client-side Navigation เพื่อความลื่นไหลและไม่ต้องรีเฟรชหน้าจอ (ห้ามสลับแท็บด้วย state ธรรมดาโดยไม่มี route)
+- ใน `app.vue` ต้องมีแท็ก `<NuxtPage />` (ครอบด้วย `<NuxtLayout>` ร่วมกับ Layout ใน `layouts/default.vue`)
+- ชื่อไฟล์และโฟลเดอร์ภายใต้ `pages` ต้องเป็นตัวพิมพ์เล็ก (lowercase/kebab-case) เสมอ
 
 ---
 
-## 1. แผนงานและรายการฟีเจอร์ทั้งหมด (Feature Roadmap & Ownership)
+## 2. โครงสร้างโฟลเดอร์ Nuxt 4 (Strict Architecture)
+```text
+root/
+├── app/
+│   ├── assets/        # Processed static assets (CSS, fonts, images)
+│   ├── components/    # Reusable Vue components (Auto-imported)
+│   ├── composables/   # Custom Composition API hooks (useBackup.ts)
+│   ├── layouts/       # Shared UI layouts (layouts/default.vue)
+│   ├── middleware/    # Navigation middleware
+│   ├── pages/         # Page routes (index.vue, gallery.vue, history.vue, settings.vue)
+│   ├── plugins/       # Vue plugins & runtime libraries
+│   ├── utils/         # Helper functions (formatters)
+│   ├── app.vue        # Root component (<NuxtLayout><NuxtPage /></NuxtLayout>)
+│   ├── error.vue      # Custom error UI page
+│   └── app.config.ts  # Reactive app-level configuration
+├── server/            # Backend server routes
+├── public/            # Static files (favicon.ico, robots.txt)
+├── modules/           # Local Nuxt modules
+├── nuxt.config.ts     # Config หลัก (ssr: false, nitro.output.publicDir: 'dist')
+├── package.json       # Dependencies & Scripts
+├── tsconfig.json      # TypeScript configuration
+└── .nuxtignore        # Ignore patterns
+```
+
+---
+
+## 3. แผนงานและรายการฟีเจอร์ทั้งหมด (Feature Roadmap & Ownership)
 
 ### A. โครงโปรเจกต์และฐานข้อมูล
 - [x] ตั้งโปรเจกต์ Wails + Nuxt ให้รันได้บน Windows และ macOS
 - [x] เชื่อม SQLite ผ่าน GORM และสร้างตาราง `photos`, `tags`, `photo_tags` (WAL mode เปิดใช้งานแล้ว)
-- [ ] Model และฟังก์ชัน CRUD ของ 3 ตาราง (Model ของ SQLite ทำแล้ว เหลือฟังก์ชัน CRUD เพิ่มเติม)
-
----
+- [ ] Model และฟังก์ชัน CRUD ของ 3 ตาราง (Model ของ SQLite ทำแล้ว เหลือฟังก์ชัน CRUD)
 
 ### B. สำรองรูปภาพ (งานของ Keen: ฟีเจอร์ข้อ 4 - 11) [รับผิดชอบโดย Keen]
 *ใช้เทคนิคเทียบเท่าข้อสอบกลางภาค (เต็ม 100%)*
@@ -27,15 +60,11 @@
 - [x] **10. แสดงไฟล์จริงในโฟลเดอร์ปลายทาง** (`/list dest`)
 - [x] **11. State Guard**: ป้องกันกรณีที่ยังไม่ได้ตั้งปลายทางหรือต้นทาง ให้แจ้งเตือนก่อน ป้องกันโปรแกรม Crash
 
----
-
 ### C. AI วิเคราะห์ภาพ (งานของ ป้อ: ฟีเจอร์ข้อ 12 - 14)
 *สถานะ: ยังไม่มีระบบ ให้ทำเป็น UI Mockup หน้าภาพตัวอย่างไว้ก่อน*
 - [ ] 12. ส่งรูปให้ AI ได้คำอธิบายและ Tag ตอนสำรอง (วิเคราะห์ครั้งเดียว)
 - [ ] 13. บันทึกคำอธิบายและ Tag ลง DB
 - [ ] 14. จัดการกรณี AI ล้มเหลว (ย้ายไฟล์ตามปกติ ปล่อยคำอธิบายว่าง)
-
----
 
 ### D. ค้นหาและแสดงภาพ (งานของ Pun: ฟีเจอร์ข้อ 15 - 19)
 *สถานะ: ยังไม่มีระบบ ให้ทำเป็น UI Mockup หน้าภาพตัวอย่างไว้ก่อน*
@@ -44,8 +73,6 @@
 - [ ] 17. ค้นหาด้วยการคลิก Tag และแสดงรูปหลายภาพ
 - [ ] 18. หน้ารายละเอียดภาพ: ภาพใหญ่, คำอธิบาย, Tag, ข้อมูลไฟล์
 - [ ] 19. แก้ไขคำอธิบาย และเพิ่ม/ลบ Tag เอง
-
----
 
 ### E. ประวัติและตรวจสอบ (งานของ Per: ฟีเจอร์ข้อ 20 - 25)
 *สถานะ: ยังไม่มีระบบ ให้ทำเป็น UI Mockup หน้าภาพตัวอย่างไว้ก่อน*
@@ -58,43 +85,7 @@
 
 ---
 
-## 2. กฎการวางโครงสร้างโฟลเดอร์ (Nuxt 4 Strict Architecture)
-
-โครงสร้างโฟลเดอร์ฝั่ง Frontend ต้องจัดตามนี้อย่างเคร่งครัด:
-
-```text
-root/
-├── app/
-│   ├── assets/        # Processed static assets (CSS, fonts, images)
-│   ├── components/    # Reusable Vue components (Auto-imported)
-│   ├── composables/   # Custom Composition API hooks (useBackup.ts)
-│   ├── layouts/       # Shared UI layouts (default.vue)
-│   ├── middleware/    # Navigation middleware
-│   ├── pages/         # Page routes (index.vue, gallery.vue, history.vue, settings.vue)
-│   ├── plugins/       # Vue plugins & runtime libraries
-│   ├── utils/         # Helper functions (formatters, calculations)
-│   ├── app.vue        # Root component (<NuxtLayout><NuxtPage /></NuxtLayout>)
-│   ├── error.vue      # Custom error UI page
-│   └── app.config.ts  # Reactive app-level configuration
-├── server/            # Backend server routes (ถ้ามี)
-├── public/            # Public static files (favicon.ico, robots.txt)
-├── modules/           # Local Nuxt modules
-├── nuxt.config.ts     # Config หลัก (ssr: false, nitro.output.publicDir: 'dist')
-├── package.json       # Dependencies & Scripts
-├── tsconfig.json      # TypeScript configuration
-├── .nuxtignore        # Files excluded during build
-└── node_modules/
-```
-
----
-
-## 3. กฎความร่วมมือในทีมและการควบคุมเวอร์ชัน (Git & Team Rules)
-
-1. **การจำกัดขอบเขต (Strict Scope Rule)**:
-   - ส่วนที่เรารับผิดชอบจริงคือ **Part B (ฟีเจอร์ข้อ 4 - 11)** เท่านั้น
-   - ส่วนที่ยังไม่มีระบบ (Part C, D, E) ของเพื่อน **ให้ทำเป็นหน้าภาพตัวอย่าง (UI Mockup) ไปก่อน** เพื่อให้เห็นการทำงานภาพรวมโดยไม่ไปทับซ้อนกับระบบของเพื่อน
-2. **ห้ามแก้ไข Schema ฐานข้อมูล 3 ตารางหลัก**:
-   - ตารางที่เพื่อนออกแบบมี 3 ตารางคือ `photos`, `tags`, `photo_tags` ห้ามสร้างตารางอื่นที่ไม่เกี่ยวข้องหรือลบฟิลด์เดิม
-3. **การส่งโค้ดผ่าน Git**:
-   - ห้าม Commit หรือ Push ขึ้น Branch `main` หรือ `develop` โดยตรงเด็ดขาด
-   - งานทั้งหมดต้องทำและ Push ขึ้นที่ Branch **`featureB`** เท่านั้น
+## 4. กฎความร่วมมือในทีมและการควบคุมเวอร์ชัน (Git Rules)
+- Part B พัฒนาระบบจริง ส่วน Part C, D, E ทำเป็น UI Mockup รอเพื่อน
+- ห้ามดัดแปลงหรือลบ 3 ตารางในฐานข้อมูล
+- ทำงานและ Push การเปลี่ยนแปลงขึ้น Branch **`featureB`** เท่านั้น

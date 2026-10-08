@@ -4,14 +4,10 @@
     <WindowBar />
 
     <div class="app-body">
-      <!-- Sidebar Navigation with DB Status -->
-      <Sidebar 
-        :destPath="destPath"
-        :currentTab="currentTab"
-        @select-tab="handleSelectTab"
-      />
+      <!-- Sidebar Navigation via NuxtLink -->
+      <Sidebar :destPath="destPath" />
 
-      <!-- Content Area via Nuxt Slot -->
+      <!-- Content Area rendered by Nuxt Routing -->
       <main class="main-content">
         <slot />
       </main>
@@ -20,24 +16,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 
-const route = useRoute()
 const destPath = ref('~/Pictures/PhotoBackup')
-
-const currentTab = computed(() => {
-  if (route.path === '/gallery') return 'gallery'
-  if (route.path === '/history') return 'history'
-  if (route.path === '/settings') return 'settings'
-  return 'backup'
-})
-
-function handleSelectTab(tab: string) {
-  if (tab === 'backup') navigateTo('/')
-  else if (tab === 'gallery') navigateTo('/gallery')
-  else if (tab === 'history') navigateTo('/history')
-  else if (tab === 'settings') navigateTo('/settings')
-}
 
 onMounted(async () => {
   if (typeof (window as any)?.go?.main?.App?.GetDestPath === 'function') {

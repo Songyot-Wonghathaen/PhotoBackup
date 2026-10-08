@@ -1,8 +1,5 @@
 <template>
   <div class="app-root">
-    <!-- Window Bar (macOS Traffic Light Titlebar) -->
-    <WindowBar />
-
     <div class="app-body">
       <!-- Sidebar Navigation via NuxtLink -->
       <Sidebar :destPath="destPath" />
@@ -41,7 +38,8 @@ onMounted(async () => {
 .app-body {
   display: flex;
   flex: 1;
-  height: calc(100vh - 36px);
+  width: 100%;
+  height: 100vh;
   overflow: hidden;
 }
 

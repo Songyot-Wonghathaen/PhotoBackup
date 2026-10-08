@@ -13,7 +13,7 @@
 - **การเปลี่ยนหน้าต้องใช้แท็ก `<NuxtLink to="...">`** สำหรับ Client-side Navigation เพื่อความลื่นไหลและไม่ต้องรีเฟรชหน้าต่างแอปพลิเคชัน (Single Page Routing)
 - ใน `app.vue` ต้องมีแท็ก `<NuxtPage />` ครอบด้วย `<NuxtLayout>` ร่วมกับ `layouts/default.vue`
 - ชื่อโฟลเดอร์และไฟล์ภายใต้ `pages` ต้องเป็นตัวพิมพ์เล็ก (lowercase/kebab-case) ทั้งหมด
-- โฟลเดอร์ `components/` มีไว้สำหรับ Reusable Components เท่านั้น (เช่น `Sidebar.vue`, `WindowBar.vue`) โดย Nuxt จะ Auto-import อัตโนมัติ ไม่นำหน้าเว็บทั้งหน้าไปใส่ไว้ใน `components/`
+- โฟลเดอร์ `components/` มีไว้สำหรับ Reusable Components เท่านั้น (เช่น `Sidebar.vue`) โดย Nuxt จะ Auto-import อัตโนมัติ ไม่นำหน้าเว็บทั้งหน้าไปใส่ไว้ใน `components/`
 
 ---
 
@@ -22,7 +22,7 @@
 root/
 ├── app/
 │   ├── assets/        # Processed static assets (CSS, fonts, images)
-│   ├── components/    # Reusable Vue components (Auto-imported: Sidebar, WindowBar)
+│   ├── components/    # Reusable Vue components (Auto-imported: Sidebar)
 │   ├── composables/   # Custom Composition API hooks
 │   ├── layouts/       # Shared UI layouts (layouts/default.vue พร้อม <slot />)
 │   ├── middleware/    # Navigation middleware

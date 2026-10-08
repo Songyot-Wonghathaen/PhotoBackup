@@ -1,15 +1,17 @@
 # กฎระเบียบและแนวทางการพัฒนา PhotoVault (PhotoBackup)
 
-## 1. กฎเหล็กการเปลี่ยนหน้าด้วย Routing (Strict Routing Rule)
-**การนำทางและเปลี่ยนหน้าจอทั้งหมด ต้องใช้ระบบ File-based Routing ของ Nuxt ตามที่เอกสารการเรียนสอนอย่างเคร่งครัด**:
-- ทุกหน้าจอต้องสร้างเป็นไฟล์ `.vue` ภายใต้โฟลเดอร์ `frontend/app/pages/`
+## 1. กฎเหล็กการเปลี่ยนหน้าและการวางเส้นทาง (Strict Sub-Folder Routing Rule)
+**การนำทางและสร้างเส้นทางทั้งหมด ต้องใช้ระบบ Sub-folder Route ของ Nuxt ตามที่เอกสารการเรียนการสอนระบุอย่างเคร่งครัด**:
+- หน้าหลักเริ่มต้น:
   - `pages/index.vue` -> เส้นทาง `/` (หน้าหลักเริ่มต้น: สำรองรูปภาพ Part B)
-  - `pages/gallery.vue` -> เส้นทาง `/gallery` (หน้าแกลเลอรี & ค้นหา)
-  - `pages/history.vue` -> เส้นทาง `/history` (หน้าประวัติ & ตรวจสอบ)
-  - `pages/settings.vue` -> เส้นทาง `/settings` (หน้าตั้งค่า)
-- **การเปลี่ยนหน้าต้องใช้แท็ก `<NuxtLink to="...">`** สำหรับการนำทางแบบ Client-side Navigation เพื่อความลื่นไหลและไม่ต้องรีเฟรชหน้าจอ (ห้ามสลับแท็บด้วย state ธรรมดาโดยไม่มี route)
-- ใน `app.vue` ต้องมีแท็ก `<NuxtPage />` (ครอบด้วย `<NuxtLayout>` ร่วมกับ Layout ใน `layouts/default.vue`)
-- ชื่อไฟล์และโฟลเดอร์ภายใต้ `pages` ต้องเป็นตัวพิมพ์เล็ก (lowercase/kebab-case) เสมอ
+- หน้าจอระบบอื่น ๆ ต้องสร้างเป็นโฟลเดอร์ย่อยและมีไฟล์ `index.vue` เสมอ (Sub-folder Route):
+  - `pages/gallery/index.vue` -> เส้นทาง `/gallery` (หน้าแกลเลอรี & ค้นหา)
+  - `pages/history/index.vue` -> เส้นทาง `/history` (หน้าประวัติ & ตรวจสอบ)
+  - `pages/settings/index.vue` -> เส้นทาง `/settings` (หน้าตั้งค่า)
+  - *(รองรับ Dynamic Parameter ในอนาคต เช่น `pages/gallery/[idx].vue` ด้วย `$route.params.idx`)*
+- **การเปลี่ยนหน้าต้องใช้แท็ก `<NuxtLink to="...">`** สำหรับ Client-side Navigation เพื่อความลื่นไหลและไม่ต้องรีเฟรชหน้าต่างแอปพลิเคชัน
+- ใน `app.vue` ต้องมีแท็ก `<NuxtPage />` (ครอบด้วย `<NuxtLayout>` ร่วมกับ `layouts/default.vue`)
+- ชื่อโฟลเดอร์และไฟล์ภายใต้ `pages` ต้องเป็นตัวพิมพ์เล็ก (lowercase/kebab-case) ทั้งหมด
 
 ---
 
@@ -22,7 +24,14 @@ root/
 │   ├── composables/   # Custom Composition API hooks (useBackup.ts)
 │   ├── layouts/       # Shared UI layouts (layouts/default.vue)
 │   ├── middleware/    # Navigation middleware
-│   ├── pages/         # Page routes (index.vue, gallery.vue, history.vue, settings.vue)
+│   ├── pages/         # Page routes แบบ Sub-folder Route
+│   │   ├── index.vue            # Route: / (หน้าหลัก สำรองรูปภาพ)
+│   │   ├── gallery/
+│   │   │   └── index.vue        # Route: /gallery (แกลเลอรี & ค้นหา)
+│   │   ├── history/
+│   │   │   └── index.vue        # Route: /history (ประวัติ & ตรวจสอบ)
+│   │   └── settings/
+│   │       └── index.vue        # Route: /settings (ตั้งค่าระบบ)
 │   ├── plugins/       # Vue plugins & runtime libraries
 │   ├── utils/         # Helper functions (formatters)
 │   ├── app.vue        # Root component (<NuxtLayout><NuxtPage /></NuxtLayout>)

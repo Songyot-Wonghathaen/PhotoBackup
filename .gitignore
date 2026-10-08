@@ -1,6 +1,10 @@
 build/bin
 node_modules
-frontend/dist
+frontend/dist/*
+!frontend/dist/index.html
+!frontend/dist/200.html
+!frontend/dist/favicon.ico
+!frontend/dist/robots.txt
 
 # Local env files
 .env

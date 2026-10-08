@@ -213,8 +213,8 @@
           :class="{ selected: isSelected(photo.filename) }"
           @click="toggleSelect(photo.filename)"
         >
-          <!-- Thumbnail preview container with Figma artistic gradient waves -->
-          <div class="thumb-wrapper" :style="getArtisticGradient(index)">
+          <!-- Thumbnail preview container with real image preview -->
+          <div class="thumb-wrapper">
             <!-- Top Checkbox -->
             <div class="checkbox-container" @click.stop="toggleSelect(photo.filename)">
               <div class="custom-checkbox" :class="{ checked: isSelected(photo.filename) }">
@@ -224,8 +224,18 @@
               </div>
             </div>
 
-            <!-- Stylized sun / moon & wave shape matching Figma SVG -->
-            <div class="thumb-art">
+            <!-- Real Image Thumbnail -->
+            <img 
+              v-if="photo.full_path && !photo.load_failed"
+              :src="'/api/thumbnail?path=' + encodeURIComponent(photo.full_path)"
+              :alt="photo.filename"
+              class="thumb-img"
+              loading="lazy"
+              @error="photo.load_failed = true"
+            />
+
+            <!-- Stylized fallback if image loading fails or browser mode -->
+            <div v-else class="thumb-art-fallback" :style="getArtisticGradient(index)">
               <div class="art-sun" :style="getSunStyle(index)"></div>
               <svg class="art-wave" viewBox="0 0 200 80" preserveAspectRatio="none">
                 <path d="M0,45 C50,20 120,65 200,35 L200,80 L0,80 Z" :fill="getWaveColor(index)"/>
@@ -402,6 +412,8 @@ interface PhotoItem {
   filename: string
   size_bytes: number
   is_duplicate: boolean
+  full_path?: string
+  load_failed?: boolean
 }
 
 // Props & Emits
@@ -565,7 +577,9 @@ function handleBrowserFolderUpload(event: Event) {
   sourceFiles.value = images.map(f => ({
     filename: f.name,
     size_bytes: f.size,
-    is_duplicate: destLower.has(f.name.toLowerCase())
+    full_path: URL.createObjectURL(f),
+    is_duplicate: destLower.has(f.name.toLowerCase()),
+    load_failed: false
   }))
   selectedFiles.value = sourceFiles.value.filter(f => !f.is_duplicate).map(f => f.filename)
 }
@@ -630,7 +644,9 @@ async function refreshSourceFiles() {
         sourceFiles.value = imageItems.map((item: any) => ({
           filename: item.filename,
           size_bytes: item.size_bytes,
-          is_duplicate: destLower.has(item.filename.toLowerCase())
+          full_path: item.full_path,
+          is_duplicate: destLower.has(item.filename.toLowerCase()),
+          load_failed: false
         }))
         selectedFiles.value = sourceFiles.value.filter(f => !f.is_duplicate).map(f => f.filename)
       } else {
@@ -1190,6 +1206,24 @@ onMounted(async () => {
 .custom-checkbox.checked {
   background: #4F46E5;
   border-color: #4F46E5;
+}
+
+.thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.2s ease;
+}
+
+.photo-card:hover .thumb-img {
+  transform: scale(1.05);
+}
+
+.thumb-art-fallback {
+  width: 100%;
+  height: 100%;
+  position: relative;
 }
 
 .thumb-art {

@@ -99,12 +99,16 @@ export function useBackup() {
 
   // Browser folder upload handler
   function handleBrowserFolderUpload(event: Event) {
-    const target = event.target as HTMLInputElement
-    if (!target.files || target.files.length === 0) return
+    const target = event.target as HTMLInputElement | null
+    if (!target || !target.files || target.files.length === 0) return
     const files = Array.from(target.files)
+    const firstFile = files[0]
+    if (!firstFile) return
 
-    const firstPath = files[0].webkitRelativePath || files[0].name
-    const folderName = firstPath.includes('/') ? firstPath.split('/')[0] : 'โฟลเดอร์ที่เลือก'
+    const relativePath = (firstFile as any).webkitRelativePath as string | undefined
+    const firstPath = relativePath || firstFile.name || ''
+    const parts = firstPath.split('/')
+    const folderName: string = (parts.length > 0 && parts[0]) ? parts[0] : 'โฟลเดอร์ที่เลือก'
     sourcePath.value = folderName
 
     const validExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.heic', '.raw', '.svg']
@@ -195,7 +199,7 @@ export function useBackup() {
           selectedFiles.value = sourceFiles.value.filter(f => !f.is_duplicate).map(f => f.filename)
 
           // Load real thumbnails via Wails IPC
-          const pathsToLoad = sourceFiles.value.map(f => f.full_path).filter(Boolean) as string[]
+          const pathsToLoad = sourceFiles.value.map(f => f.full_path).filter((p): p is string => Boolean(p))
           loadThumbnails(pathsToLoad)
         } else {
           sourceFiles.value = []

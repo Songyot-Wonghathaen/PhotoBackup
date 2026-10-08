@@ -9,6 +9,10 @@ export function DeletePhotos(arg1:Array<string>,arg2:boolean):Promise<number>;
 
 export function GetDestPath():Promise<string>;
 
+export function GetPhotoThumbnail(arg1:string):Promise<string>;
+
+export function GetPhotoThumbnails(arg1:Array<string>):Promise<Record<string, string>>;
+
 export function GetSourcePath():Promise<string>;
 
 export function Greet(arg1:string):Promise<string>;

@@ -14,6 +14,14 @@ export function GetDestPath() {
   return window['go']['main']['App']['GetDestPath']();
 }
 
+export function GetPhotoThumbnail(arg1) {
+  return window['go']['main']['App']['GetPhotoThumbnail'](arg1);
+}
+
+export function GetPhotoThumbnails(arg1) {
+  return window['go']['main']['App']['GetPhotoThumbnails'](arg1);
+}
+
 export function GetSourcePath() {
   return window['go']['main']['App']['GetSourcePath']();
 }

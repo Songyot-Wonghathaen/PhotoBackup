@@ -13,15 +13,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { onMounted } from 'vue'
+import { useBackup } from '~/composables/useBackup'
 
-const destPath = ref('~/Pictures/PhotoBackup')
+const { destPath, initBackupState } = useBackup()
 
-onMounted(async () => {
-  if (typeof (window as any)?.go?.main?.App?.GetDestPath === 'function') {
-    const dst = await (window as any).go.main.App.GetDestPath()
-    if (dst) destPath.value = dst
-  }
+onMounted(() => {
+  initBackupState()
 })
 </script>
 

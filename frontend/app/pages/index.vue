@@ -405,15 +405,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-
-interface PhotoItem {
-  filename: string
-  size_bytes: number
-  is_duplicate: boolean
-  full_path?: string
-  load_failed?: boolean
-}
+import { ref, onMounted, watch } from 'vue'
+import { useBackup } from '~/composables/useBackup'
 
 // Props & Emits
 const props = defineProps<{
@@ -426,84 +419,69 @@ const emit = defineEmits<{
   (e: 'update:source', path: string): void
 }>()
 
-// State - 100% Real Data
 const folderInputRef = ref<HTMLInputElement | null>(null)
-const sourceType = ref<'usb' | 'phone'>('usb')
-const sourcePath = ref(props.sourcePathProp || '')
-const destPath = ref(props.destPathProp || '')
-const destCount = ref(0)
-const isProcessing = ref(false)
-const showMissingModal = ref(false)
-const showDestFilesModal = ref(false)
-const destFilesList = ref<any[]>([])
-const selectedFiles = ref<string[]>([])
-const thumbnailMap = ref<Record<string, string>>({})
 
-// Integrity Result (starts null - loaded live by backend CheckIntegrity)
-const integrityResult = ref<any>(null)
+// Consume all backend API operations and reactive state from useBackup composable
+const {
+  sourceType,
+  sourcePath,
+  destPath,
+  destCount,
+  isProcessing,
+  sourceFiles,
+  selectedFiles,
+  thumbnailMap,
+  destFilesList,
+  showMissingModal,
+  showDestFilesModal,
+  integrityResult,
+  lastSummary,
+  sourceTotalBytes,
+  displayMissingPreview,
+  allSelected,
+  isSelected,
+  toggleSelect,
+  toggleSelectAll,
+  formatTotalSize,
+  selectSourceFolder,
+  handleBrowserFolderUpload,
+  selectDestFolder,
+  listDestFiles,
+  moveSelectedPhotos,
+  moveAllPhotos,
+  initBackupState
+} = useBackup()
 
-// Last Move Summary (starts has_run: false - populated when backup completes)
-const lastSummary = ref<{
-  total_files: number
-  moved_files: number
-  skipped_files: number
-  failed_files: number
-  duration_ms: number
-  duration_formatted: string
-  has_run: boolean
-}>({
-  total_files: 0,
-  moved_files: 0,
-  skipped_files: 0,
-  failed_files: 0,
-  duration_ms: 0,
-  duration_formatted: '-',
-  has_run: false
-})
-
-// Photo items in source (starts empty [] - populated with real files from device)
-const sourceFiles = ref<PhotoItem[]>([])
-
-const sourceTotalBytes = computed(() => {
-  return sourceFiles.value.reduce((acc, f) => acc + f.size_bytes, 0)
-})
-
-const displayMissingPreview = computed(() => {
-  if (!integrityResult.value || !integrityResult.value.missing_in_disk) return ''
-  return integrityResult.value.missing_in_disk.join(', ')
-})
-
-const allSelected = computed(() => {
-  return sourceFiles.value.length > 0 && selectedFiles.value.length === sourceFiles.value.length
-})
-
-// Selection helpers
-function isSelected(filename: string): boolean {
-  return selectedFiles.value.includes(filename)
+// Sync props if provided
+if (props.sourcePathProp) {
+  sourcePath.value = props.sourcePathProp
+}
+if (props.destPathProp) {
+  destPath.value = props.destPathProp
 }
 
-function toggleSelect(filename: string) {
-  const index = selectedFiles.value.indexOf(filename)
-  if (index > -1) {
-    selectedFiles.value.splice(index, 1)
-  } else {
-    selectedFiles.value.push(filename)
-  }
+watch(sourcePath, (newVal) => emit('update:source', newVal))
+watch(destPath, (newVal) => emit('update:dest', newVal))
+
+// Action bridges for template buttons
+function handleSelectSource() {
+  selectSourceFolder(folderInputRef.value)
 }
 
-function toggleSelectAll() {
-  if (allSelected.value) {
-    selectedFiles.value = []
-  } else {
-    selectedFiles.value = sourceFiles.value.map(f => f.filename)
-  }
+function handleSelectDest() {
+  selectDestFolder()
 }
 
-function formatTotalSize(bytes: number): string {
-  if (bytes > 1024 * 1024 * 1024) {
-    return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB'
-  }
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+function handleOpenDestList() {
+  listDestFiles()
+}
+
+function handleMoveSelected() {
+  moveSelectedPhotos()
+}
+
+function handleMoveAll() {
+  moveAllPhotos()
 }
 
 // Art gradients and curves matching Figma's design
@@ -537,284 +515,8 @@ function getWaveColor(index: number) {
   return theme.wave
 }
 
-// Wails Backend Interactions & Real Folder Picker
-async function handleSelectSource() {
-  try {
-    if (typeof (window as any)?.go?.main?.App?.SelectSourceFolder === 'function') {
-      const selected = await (window as any).go.main.App.SelectSourceFolder()
-      if (selected) {
-        sourcePath.value = selected
-        emit('update:source', selected)
-        await refreshSourceFiles()
-      }
-    } else {
-      // In browser preview, trigger native folder chooser
-      folderInputRef.value?.click()
-    }
-  } catch (err) {
-    console.error('Failed to select source folder:', err)
-  }
-}
-
-function handleBrowserFolderUpload(event: Event) {
-  const target = event.target as HTMLInputElement
-  if (!target.files || target.files.length === 0) return
-  const files = Array.from(target.files)
-  
-  const firstPath = files[0].webkitRelativePath || files[0].name
-  const folderName = firstPath.includes('/') ? firstPath.split('/')[0] : 'โฟลเดอร์ที่เลือก'
-  sourcePath.value = folderName
-  emit('update:source', folderName)
-
-  const validExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.heic', '.raw', '.svg']
-  const images = files.filter(f => {
-    const name = f.name.toLowerCase()
-    return validExts.some(ext => name.endsWith(ext))
-  })
-
-  const destLower = new Set(destFilesList.value.map(f => f.filename.toLowerCase()))
-
-  sourceFiles.value = images.map(f => {
-    const url = URL.createObjectURL(f)
-    thumbnailMap.value[url] = url
-    return {
-      filename: f.name,
-      size_bytes: f.size,
-      full_path: url,
-      is_duplicate: destLower.has(f.name.toLowerCase()),
-      load_failed: false
-    }
-  })
-  selectedFiles.value = sourceFiles.value.filter(f => !f.is_duplicate).map(f => f.filename)
-}
-
-async function handleSelectDest() {
-  try {
-    if (typeof (window as any)?.go?.main?.App?.SelectDestFolder === 'function') {
-      const res = await (window as any).go.main.App.SelectDestFolder()
-      if (res) {
-        const dest = await (window as any).go.main.App.GetDestPath()
-        destPath.value = dest
-        emit('update:dest', dest)
-        integrityResult.value = res
-        destCount.value = res.total_disk || 0
-      }
-    } else {
-      const chosen = prompt('กำหนดโฟลเดอร์ปลายทางสำหรับจัดเก็บรูปภาพ (เช่น D:/PhotoBackup):', destPath.value || 'D:/PhotoBackup')
-      if (chosen) {
-        destPath.value = chosen
-        emit('update:dest', chosen)
-        destCount.value = destFilesList.value.length
-      }
-    }
-  } catch (err) {
-    console.error('Failed to select dest folder:', err)
-  }
-}
-
-async function handleOpenDestList() {
-  if (!destPath.value) {
-    alert('กรุณาเลือกโฟลเดอร์ปลายทางก่อน!')
-    return
-  }
-  try {
-    if (typeof (window as any)?.go?.main?.App?.ListDestFileItems === 'function') {
-      const items = await (window as any).go.main.App.ListDestFileItems(destPath.value)
-      destFilesList.value = items || []
-    }
-  } catch (err) {
-    console.error('Failed to list dest files:', err)
-  }
-  showDestFilesModal.value = true
-}
-
-async function loadThumbnails(paths: string[]) {
-  if (!paths || paths.length === 0) return
-  try {
-    if (typeof (window as any)?.go?.main?.App?.GetPhotoThumbnails === 'function') {
-      const thumbs = await (window as any).go.main.App.GetPhotoThumbnails(paths)
-      if (thumbs) {
-        thumbnailMap.value = { ...thumbnailMap.value, ...thumbs }
-      }
-    }
-  } catch (err) {
-    console.error('Failed to load thumbnails:', err)
-  }
-}
-
-async function refreshSourceFiles() {
-  try {
-    if (typeof (window as any)?.go?.main?.App?.ListSourceFileItems === 'function') {
-      const items = await (window as any).go.main.App.ListSourceFileItems()
-      if (items && Array.isArray(items)) {
-        // Filter image files only
-        const imageItems = items.filter((item: any) => item.is_image)
-
-        // Feature 7: Detect duplicates with destination disk files
-        let destFiles: string[] = []
-        if (destPath.value && typeof (window as any)?.go?.main?.App?.ListDestPhotos === 'function') {
-          try {
-            destFiles = await (window as any).go.main.App.ListDestPhotos(destPath.value) || []
-          } catch (_) {}
-        }
-        const destLower = new Set((destFiles || []).map((f: string) => f.toLowerCase()))
-
-        sourceFiles.value = imageItems.map((item: any) => ({
-          filename: item.filename,
-          size_bytes: item.size_bytes,
-          full_path: item.full_path,
-          is_duplicate: destLower.has(item.filename.toLowerCase()),
-          load_failed: false
-        }))
-        selectedFiles.value = sourceFiles.value.filter(f => !f.is_duplicate).map(f => f.filename)
-
-        // Load real thumbnails via Wails IPC
-        const pathsToLoad = sourceFiles.value.map(f => f.full_path).filter(Boolean) as string[]
-        loadThumbnails(pathsToLoad)
-      } else {
-        sourceFiles.value = []
-        selectedFiles.value = []
-      }
-    }
-  } catch (err) {
-    console.error('Failed to list source items:', err)
-    sourceFiles.value = []
-    selectedFiles.value = []
-  }
-}
-
-async function handleMoveSelected() {
-  // Feature 11: State Guard (Validate source & dest before processing)
-  if (!sourcePath.value) {
-    alert('กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการย้ายไฟล์!')
-    return
-  }
-  if (!destPath.value) {
-    alert('กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการย้ายไฟล์!')
-    return
-  }
-  if (selectedFiles.value.length === 0) {
-    alert('กรุณาเลือกรูปภาพอย่างน้อย 1 ไฟล์ที่ต้องการย้าย!')
-    return
-  }
-  isProcessing.value = true
-  try {
-    if (typeof (window as any)?.go?.main?.App?.MovePhotos === 'function') {
-      const summary = await (window as any).go.main.App.MovePhotos(selectedFiles.value, false)
-      lastSummary.value = {
-        total_files: summary.total_files || selectedFiles.value.length,
-        moved_files: summary.moved_files || 0,
-        skipped_files: summary.skipped_files || 0,
-        failed_files: summary.failed_files || 0,
-        duration_ms: summary.duration_ms || 0,
-        duration_formatted: summary.duration_formatted || `${summary.duration_ms} ms`,
-        has_run: true
-      }
-      await refreshSourceFiles()
-      if (typeof (window as any)?.go?.main?.App?.CheckIntegrity === 'function') {
-        integrityResult.value = await (window as any).go.main.App.CheckIntegrity(destPath.value)
-        destCount.value = integrityResult.value?.total_disk || 0
-      }
-      alert(`สำรองรูปภาพที่เลือกสำเร็จ ${summary.moved_files} ไฟล์ (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`)
-    } else {
-      // Browser preview mode with real selected files
-      const count = selectedFiles.value.length
-      destCount.value += count
-      lastSummary.value = {
-        total_files: count,
-        moved_files: count,
-        skipped_files: 0,
-        failed_files: 0,
-        duration_ms: 18.5,
-        duration_formatted: '18.50 ms',
-        has_run: true
-      }
-      sourceFiles.value = sourceFiles.value.filter(f => !selectedFiles.value.includes(f.filename))
-      selectedFiles.value = []
-      alert(`จำลองการย้ายไฟล์สำเร็จ ${count} รูป (เวลา ${lastSummary.value.duration_formatted})`)
-    }
-  } catch (err: any) {
-    alert('เกิดข้อผิดพลาดในการย้าย: ' + (err?.message || err))
-  } finally {
-    isProcessing.value = false
-  }
-}
-
-async function handleMoveAll() {
-  // Feature 11: State Guard (Validate source & dest before processing)
-  if (!sourcePath.value) {
-    alert('กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการสำรองข้อมูล!')
-    return
-  }
-  if (!destPath.value) {
-    alert('กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการสำรองข้อมูล!')
-    return
-  }
-  if (sourceFiles.value.length === 0) {
-    alert('ไม่พบรูปภาพในโฟลเดอร์ต้นทางที่จะสำรอง!')
-    return
-  }
-  isProcessing.value = true
-  try {
-    if (typeof (window as any)?.go?.main?.App?.MovePhotos === 'function') {
-      const summary = await (window as any).go.main.App.MovePhotos([], true)
-      lastSummary.value = {
-        total_files: summary.total_files || sourceFiles.value.length,
-        moved_files: summary.moved_files || 0,
-        skipped_files: summary.skipped_files || 0,
-        failed_files: summary.failed_files || 0,
-        duration_ms: summary.duration_ms || 0,
-        duration_formatted: summary.duration_formatted || `${summary.duration_ms} ms`,
-        has_run: true
-      }
-      await refreshSourceFiles()
-      if (typeof (window as any)?.go?.main?.App?.CheckIntegrity === 'function') {
-        integrityResult.value = await (window as any).go.main.App.CheckIntegrity(destPath.value)
-        destCount.value = integrityResult.value?.total_disk || 0
-      }
-      alert(`สำรองรูปภาพทั้งหมดสำเร็จ ${summary.moved_files} ไฟล์ (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`)
-    } else {
-      // Browser preview mode with real files
-      const count = sourceFiles.value.filter(f => !f.is_duplicate).length
-      const skipped = sourceFiles.value.filter(f => f.is_duplicate).length
-      destCount.value += count
-      lastSummary.value = {
-        total_files: sourceFiles.value.length,
-        moved_files: count,
-        skipped_files: skipped,
-        failed_files: 0,
-        duration_ms: 32.4,
-        duration_formatted: '32.40 ms',
-        has_run: true
-      }
-      sourceFiles.value = sourceFiles.value.filter(f => f.is_duplicate)
-      selectedFiles.value = []
-      alert(`จำลองการสำรองทั้งหมดสำเร็จ ${count} รูป (ข้ามไฟล์ซ้ำ ${skipped} รูป) เวลา ${lastSummary.value.duration_formatted}`)
-    }
-  } catch (err: any) {
-    alert('เกิดข้อผิดพลาดในการย้าย: ' + (err?.message || err))
-  } finally {
-    isProcessing.value = false
-  }
-}
-
-onMounted(async () => {
-  // If running inside Wails, read live paths and real data from Go backend
-  if (typeof (window as any)?.go?.main?.App?.GetSourcePath === 'function') {
-    const src = await (window as any).go.main.App.GetSourcePath()
-    if (src) {
-      sourcePath.value = src
-      await refreshSourceFiles()
-    }
-  }
-  if (typeof (window as any)?.go?.main?.App?.GetDestPath === 'function') {
-    const dst = await (window as any).go.main.App.GetDestPath()
-    if (dst) {
-      destPath.value = dst
-      integrityResult.value = await (window as any).go.main.App.CheckIntegrity(dst)
-      destCount.value = integrityResult.value?.total_disk || 0
-    }
-  }
+onMounted(() => {
+  initBackupState()
 })
 </script>
 

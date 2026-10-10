@@ -288,12 +288,80 @@
           </svg>
           ข้ามไฟล์ซ้ำ {{ lastSummary.skipped_files }}
         </span>
-        <span class="status-pill pill-ai">
+        <button
+          class="status-pill pill-ai clickable"
+          @click="showAiResultsModal = true"
+          title="คลิกเพื่อดูคำอธิบายและ Tag จาก AI ทั้งหมด"
+        >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
           </svg>
-          AI วิเคราะห์ {{ lastSummary.moved_files }}/{{ lastSummary.moved_files }}
+          AI วิเคราะห์ {{ lastSummary.moved_files }}/{{ lastSummary.moved_files }} (คลิกดูคำอธิบาย & Tag)
+        </button>
+      </div>
+
+      <div class="status-right">
+        <div class="timer-box">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          <span class="timer-label">เวลาที่ใช้ทั้งหมด</span>
+          <span class="timer-value">{{ lastSummary.duration_formatted }}</span>
+        </div>
+      </div>
+    </footer>
+
+    <!-- AI Analysis Status Tab (Bottom Right when analyzing) -->
+    <div v-if="isAnalyzing" class="ai-status-tab">
+      <div class="ai-tab-header">
+        <div class="ai-tab-icon">
+          <svg class="ai-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+          </svg>
+        </div>
+        <div class="ai-tab-text">
+          <span class="ai-tab-title">กำลังวิเคราะห์ภาพด้วย AI</span>
+          <span class="ai-tab-progress">{{ aiProgress.current }}/{{ aiProgress.total }}</span>
+        </div>
+        <button class="ai-tab-cancel" @click="handleCancelAnalysis" title="ยกเลิก">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="ai-tab-filename">{{ aiProgress.filename }}</div>
+      <div class="ai-tab-bar">
+        <div class="ai-tab-bar-fill" :style="{ width: aiProgress.total > 0 ? ((aiProgress.current / aiProgress.total) * 100) + '%' : '0%' }"></div>
+      </div>
+    </div>
+
+    <footer class="bottom-status-bar" v-else-if="!lastSummary.has_run">
+      <div class="status-left">
+        <span class="status-title">ผลการสำรองล่าสุด</span>
+        <span class="status-pill pill-success">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          ย้ายสำเร็จ {{ lastSummary.moved_files }}
         </span>
+        <span class="status-pill pill-warning">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          </svg>
+          ข้ามไฟล์ซ้ำ {{ lastSummary.skipped_files }}
+        </span>
+        <button 
+          class="status-pill pill-ai clickable" 
+          @click="showAiResultsModal = true"
+          title="คลิกเพื่อดูคำอธิบายและ Tag จาก AI ทั้งหมด"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+          </svg>
+          AI วิเคราะห์ {{ lastSummary.moved_files }}/{{ lastSummary.moved_files }} (คลิกดูคำอธิบาย & Tag)
+        </button>
       </div>
 
       <div class="status-right">
@@ -391,16 +459,105 @@
       </div>
     </div>
 
+    <!-- AI Analysis Results Modal (Part C: ฟีเจอร์ข้อ 12-14) -->
+    <div v-if="showAiResultsModal" class="modal-backdrop" @click.self="showAiResultsModal = false">
+      <div class="modal-card modal-large">
+        <div class="modal-header">
+          <div class="modal-title-row">
+            <span class="modal-icon">🤖</span>
+            <div>
+              <h3>ผลการวิเคราะห์ภาพด้วย AI (Gemini Flash)</h3>
+              <p class="modal-subtitle">บันทึกคำอธิบายและแท็กลง SQLite แล้ว (พบ {{ analyzedPhotosList.length }} ภาพ)</p>
+            </div>
+          </div>
+          <button class="btn-close" @click="showAiResultsModal = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="analyzedPhotosList.length === 0" class="empty-modal-text">
+            ยังไม่มีภาพที่วิเคราะห์ในโฟลเดอร์ปลายทางนี้
+          </div>
+          <div v-else class="ai-results-grid">
+            <div v-for="item in analyzedPhotosList" :key="item.filename" class="ai-result-card">
+              <div class="ai-card-header">
+                <span class="ai-file-name">📄 {{ item.filename }}</span>
+              </div>
+              <div class="ai-card-desc">
+                <span class="ai-label">คำอธิบายจาก AI:</span>
+                <p class="ai-desc-text">{{ item.description || '(ไม่มีคำอธิบาย - ข้ามตามเงื่อนไขข้อ 14)' }}</p>
+              </div>
+              <div class="ai-card-tags" v-if="item.tags && item.tags.length > 0">
+                <span class="ai-label">Tags:</span>
+                <div class="ai-tag-pills">
+                  <span v-for="tag in item.tags" :key="tag" class="ai-tag-chip">
+                    #{{ tag }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" @click="showAiResultsModal = false">ปิด</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Hidden folder input for browser environment fallback -->
-    <input 
-      type="file" 
-      ref="folderInputRef" 
-      webkitdirectory 
-      directory 
-      multiple 
-      style="display: none" 
-      @change="handleBrowserFolderUpload" 
+    <input
+      type="file"
+      ref="folderInputRef"
+      webkitdirectory
+      directory
+      multiple
+      style="display: none"
+      @change="handleBrowserFolderUpload"
     />
+
+    <!-- Loading Spinner Modal (Only for isProcessing, not AI) -->
+    <div v-if="isProcessing && !isAnalyzing" class="modal-backdrop loading-backdrop">
+      <div class="loading-container">
+        <div class="spinner"></div>
+        <p class="loading-text">กำลังประมวลผล...</p>
+        <p class="loading-subtext">รอสักครู่</p>
+      </div>
+    </div>
+
+    <!-- Error Alert Modal -->
+    <div v-if="aiError" class="modal-backdrop error-backdrop" @click.self="aiError = null">
+      <div class="error-card">
+        <div class="error-header">
+          <span class="error-icon">❌</span>
+          <h3>เกิดข้อผิดพลาด</h3>
+          <button class="btn-close-error" @click="aiError = null">✕</button>
+        </div>
+        <div class="error-body">
+          <p class="error-message">{{ aiError }}</p>
+          <div class="error-suggestion">
+            <strong>สาเหตุที่เป็นไปได้:</strong>
+            <ul>
+              <li>API Key หมดเงิน หรือสิ้นสุดการใช้งาน (Rate Limit)</li>
+              <li>ปัญหาการเชื่อมต่ออินเทอร์เน็ต</li>
+              <li>Server ของ Gemini AI ชั่วคราวขาด</li>
+              <li>ไฟล์ภาพมีขนาดใหญ่เกินไป</li>
+            </ul>
+          </div>
+        </div>
+        <div class="error-footer">
+          <button class="btn-error-close" @click="aiError = null">ปิด</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Success Notification Modal -->
+    <div v-if="showSuccessModal" class="modal-backdrop success-backdrop" @click.self="showSuccessModal = false">
+      <div class="success-card">
+        <div class="success-icon-top">✅</div>
+        <h3 class="success-title">สำรองสำเร็จ!</h3>
+        <p class="success-msg">{{ successMessage }}</p>
+        <div class="success-celebration">🎉</div>
+        <button class="btn-success-ok" @click="showSuccessModal = false">ตกลง</button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -428,12 +585,19 @@ const {
   destPath,
   destCount,
   isProcessing,
+  isAnalyzing,
+  aiProgress,
   sourceFiles,
   selectedFiles,
   thumbnailMap,
   destFilesList,
   showMissingModal,
   showDestFilesModal,
+  showAiResultsModal,
+  showSuccessModal,
+  successMessage,
+  analyzedPhotosList,
+  aiError,
   integrityResult,
   lastSummary,
   sourceTotalBytes,
@@ -484,6 +648,13 @@ function handleMoveAll() {
   moveAllPhotos()
 }
 
+function handleCancelAnalysis() {
+  if (confirm('คุณต้องการยกเลิกการวิเคราะห์ภาพด้วย AI หรือไม่?')) {
+    isAnalyzing.value = false
+    aiProgress.value = { current: 0, total: 0, filename: '' }
+  }
+}
+
 // Art gradients and curves matching Figma's design
 const artThemes = [
   { bg: 'linear-gradient(180deg, #93C5FD 0%, #DBEAFE 100%)', sun: '#FFFFFF', wave: '#64748B' },
@@ -501,17 +672,17 @@ const artThemes = [
 ]
 
 function getArtisticGradient(index: number) {
-  const theme = artThemes[index % artThemes.length]
+  const theme = artThemes[index % artThemes.length]!
   return { background: theme.bg }
 }
 
 function getSunStyle(index: number) {
-  const theme = artThemes[index % artThemes.length]
+  const theme = artThemes[index % artThemes.length]!
   return { background: theme.sun }
 }
 
 function getWaveColor(index: number) {
-  const theme = artThemes[index % artThemes.length]
+  const theme = artThemes[index % artThemes.length]!
   return theme.wave
 }
 
@@ -1300,5 +1471,518 @@ onMounted(() => {
   padding: 24px;
   color: #9CA3AF;
   font-size: 13px;
+}
+
+.pill-ai.clickable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid rgba(147, 51, 234, 0.3);
+}
+
+.pill-ai.clickable:hover {
+  background: #E9D5FF;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(147, 51, 234, 0.15);
+}
+
+.ai-results-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 380px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.ai-result-card {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-card-header {
+  font-weight: 600;
+  font-size: 13px;
+  color: #1E293B;
+}
+
+.ai-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748B;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+  display: block;
+}
+
+.ai-desc-text {
+  margin: 0;
+  font-size: 12.5px;
+  color: #334155;
+  line-height: 1.45;
+  background: #FFFFFF;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #E2E8F0;
+}
+
+.ai-tag-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-tag-chip {
+  background: #EEF2FF;
+  color: #4F46E5;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  border: 1px solid #E0E7FF;
+}
+
+/* Loading Spinner Modal */
+.loading-backdrop {
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(3px);
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #FFFFFF;
+  border-radius: 16px;
+  padding: 40px 32px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15);
+}
+
+.spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid #E5E7EB;
+  border-top-color: #4F46E5;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1F2937;
+  margin: 0;
+}
+
+.loading-subtext {
+  font-size: 13px;
+  color: #6B7280;
+  margin: 0;
+}
+
+/* Error Alert Modal */
+.error-backdrop {
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.error-card {
+  background: #FFFFFF;
+  border-radius: 16px;
+  width: 480px;
+  max-width: 90vw;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  border-left: 4px solid #EF4444;
+}
+
+.error-header {
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #FEE2E2;
+  background: #FEF2F2;
+}
+
+.error-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.error-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #DC2626;
+  flex: 1;
+}
+
+.btn-close-error {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  color: #DC2626;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.error-body {
+  padding: 18px 20px;
+}
+
+.error-message {
+  background: #FEE2E2;
+  border: 1px solid #FECACA;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 0 0 14px 0;
+  font-size: 13px;
+  color: #991B1B;
+  font-family: 'Inter', monospace;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.error-suggestion {
+  background: #FFFBEB;
+  border: 1px solid #FDE68A;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: #78350F;
+}
+
+.error-suggestion strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #92400E;
+}
+
+.error-suggestion ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.error-suggestion li {
+  margin: 4px 0;
+  line-height: 1.4;
+}
+
+.error-footer {
+  padding: 12px 20px;
+  background: #F9FAFB;
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid #FEE2E2;
+}
+
+.btn-error-close {
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: 1px solid #DC2626;
+  background: #DC2626;
+  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-error-close:hover {
+  background: #B91C1C;
+  border-color: #B91C1C;
+}
+
+/* Success Modal */
+.success-backdrop {
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(4px);
+}
+
+.success-card {
+  background: #FFFFFF;
+  border-radius: 20px;
+  width: 420px;
+  max-width: 90vw;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  border-top: 6px solid #10B981;
+  padding: 32px 28px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.success-icon-top {
+  font-size: 56px;
+  animation: bounce 0.6s ease;
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.success-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: #059669;
+}
+
+.success-msg {
+  margin: 0;
+  font-size: 14px;
+  color: #374151;
+  line-height: 1.6;
+  background: #ECFDF5;
+  border: 1px solid #A7F3D0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.success-celebration {
+  font-size: 32px;
+  margin: 8px 0;
+  animation: celebrate 0.8s ease infinite alternate;
+}
+
+@keyframes celebrate {
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  100% {
+    transform: scale(1.1) rotate(10deg);
+  }
+}
+
+.btn-success-ok {
+  padding: 10px 28px;
+  border-radius: 10px;
+  border: none;
+  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  color: #FFFFFF;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+  margin-top: 8px;
+}
+
+.btn-success-ok:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4);
+}
+
+.btn-success-ok:active {
+  transform: translateY(0);
+}
+
+/* Cancel Analysis Button */
+.btn-cancel-analysis {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: 1px solid #DC2626;
+  background: #FFFFFF;
+  color: #DC2626;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-top: 12px;
+  box-shadow: 0 2px 6px rgba(220, 38, 38, 0.15);
+}
+
+.btn-cancel-analysis:hover {
+  background: #FEF2F2;
+  border-color: #B91C1C;
+  color: #B91C1C;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(220, 38, 38, 0.2);
+}
+
+.btn-cancel-analysis:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(220, 38, 38, 0.15);
+}
+
+/* AI Analysis Status Tab (Bottom Right) */
+.ai-status-tab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 360px;
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  border-radius: 14px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1), 0 4px 8px rgba(0, 0, 0, 0.05);
+  padding: 14px 16px;
+  z-index: 900;
+  animation: slideInUp 0.3s ease;
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.ai-tab-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.ai-tab-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ai-spinner {
+  animation: sparkle 2s ease-in-out infinite;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.8));
+}
+
+@keyframes sparkle {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1) rotate(180deg);
+    opacity: 0.8;
+  }
+}
+
+.ai-tab-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ai-tab-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.ai-tab-progress {
+  font-size: 11px;
+  font-weight: 500;
+  color: #6B7280;
+  font-family: 'Inter', monospace;
+}
+
+.ai-tab-cancel {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  color: #6B7280;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.ai-tab-cancel:hover {
+  background: #FEF2F2;
+  border-color: #FECACA;
+  color: #DC2626;
+}
+
+.ai-tab-filename {
+  font-size: 11px;
+  color: #4B5563;
+  margin-bottom: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: monospace;
+  padding-left: 2px;
+}
+
+.ai-tab-bar {
+  height: 6px;
+  background: #F3F4F6;
+  border-radius: 9999px;
+  overflow: hidden;
+  position: relative;
+}
+
+.ai-tab-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6366F1 0%, #8B5CF6 100%);
+  border-radius: 9999px;
+  transition: width 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.ai-tab-bar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
 }
 </style>

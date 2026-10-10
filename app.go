@@ -1,6 +1,7 @@
 package main
 
 import (
+	"PhotoVault/controller/dto"
 	modelGen "PhotoVault/model/model"
 	"PhotoVault/service"
 	"PhotoVault/utils"
@@ -148,4 +149,9 @@ func (a *App) GetPhotoThumbnails(paths []string) map[string]string {
 	}
 	wg.Wait()
 	return result
+}
+
+// AnalyzePhoto triggers AI vision analysis directly for any photo file
+func (a *App) AnalyzePhoto(fullPath string) (*dto.VisionResult, error) {
+	return a.backupService.AnalyzePhoto(fullPath)
 }

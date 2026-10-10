@@ -17,6 +17,14 @@ const destFilesList = ref<FileItem[]>([])
 
 const showMissingModal = ref(false)
 const showDestFilesModal = ref(false)
+const showAiResultsModal = ref(false)
+const showSuccessModal = ref(false)
+const successMessage = ref('')
+
+const isAnalyzing = ref(false)
+const aiProgress = ref({ current: 0, total: 0, filename: '' })
+const aiError = ref<string | null>(null)
+const analyzedPhotosList = ref<Array<{ filename: string; description: string; tags: string[]; path?: string }>>([])
 
 const integrityResult = ref<IntegrityResult | null>(null)
 const lastSummary = ref<MoveSummary>({
@@ -256,12 +264,15 @@ export function useBackup() {
           duration_formatted: summary.duration_formatted || `${summary.duration_ms} ms`,
           has_run: true
         }
+        aiError.value = null // Clear any previous errors
         await refreshSourceFiles()
         if (typeof (window as any)?.go?.main?.App?.CheckIntegrity === 'function') {
           integrityResult.value = await (window as any).go.main.App.CheckIntegrity(destPath.value)
           destCount.value = integrityResult.value?.total_disk || 0
         }
-        alert(`สำรองรูปภาพที่เลือกสำเร็จ ${summary.moved_files} ไฟล์ (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`)
+        await fetchDbPhotos()
+        successMessage.value = `สำรองรูปภาพที่เลือกสำเร็จ ${summary.moved_files} ไฟล์ (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`
+        showSuccessModal.value = true
       } else {
         // Browser preview fallback
         const count = selectedFiles.value.length
@@ -277,10 +288,13 @@ export function useBackup() {
         }
         sourceFiles.value = sourceFiles.value.filter(f => !selectedFiles.value.includes(f.filename))
         selectedFiles.value = []
-        alert(`จำลองการย้ายไฟล์สำเร็จ ${count} รูป (เวลา ${lastSummary.value.duration_formatted})`)
+        successMessage.value = `จำลองการย้ายไฟล์สำเร็จ ${count} รูป (เวลา ${lastSummary.value.duration_formatted})`
+        showSuccessModal.value = true
       }
     } catch (err: any) {
-      alert('เกิดข้อผิดพลาดในการย้าย: ' + (err?.message || err))
+      const errorMsg = err?.message || String(err)
+      aiError.value = errorMsg
+      alert('เกิดข้อผิดพลาดในการย้าย: ' + errorMsg)
     } finally {
       isProcessing.value = false
     }
@@ -314,12 +328,15 @@ export function useBackup() {
           duration_formatted: summary.duration_formatted || `${summary.duration_ms} ms`,
           has_run: true
         }
+        aiError.value = null // Clear any previous errors
         await refreshSourceFiles()
         if (typeof (window as any)?.go?.main?.App?.CheckIntegrity === 'function') {
           integrityResult.value = await (window as any).go.main.App.CheckIntegrity(destPath.value)
           destCount.value = integrityResult.value?.total_disk || 0
         }
-        alert(`สำรองรูปภาพทั้งหมดสำเร็จ ${summary.moved_files} ไฟล์ (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`)
+        await fetchDbPhotos()
+        successMessage.value = `สำรองรูปภาพทั้งหมดสำเร็จ ${summary.moved_files} ไฟล์ (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`
+        showSuccessModal.value = true
       } else {
         // Browser preview fallback
         const count = sourceFiles.value.filter(f => !f.is_duplicate).length
@@ -339,9 +356,55 @@ export function useBackup() {
         alert(`จำลองการสำรองทั้งหมดสำเร็จ ${count} รูป (ข้ามไฟล์ซ้ำ ${skipped} รูป) เวลา ${lastSummary.value.duration_formatted}`)
       }
     } catch (err: any) {
-      alert('เกิดข้อผิดพลาดในการย้าย: ' + (err?.message || err))
+      const errorMsg = err?.message || String(err)
+      aiError.value = errorMsg
+      alert('เกิดข้อผิดพลาดในการย้าย: ' + errorMsg)
     } finally {
       isProcessing.value = false
+    }
+  }
+
+  // Fetch photos from DB including AI descriptions and tags
+  async function fetchDbPhotos() {
+    if (!destPath.value) return []
+    try {
+      if (typeof (window as any)?.go?.main?.App?.ListDBPhotos === 'function') {
+        const dbPhotos = await (window as any).go.main.App.ListDBPhotos(destPath.value)
+        if (dbPhotos && Array.isArray(dbPhotos)) {
+          analyzedPhotosList.value = dbPhotos.map((p: any) => {
+            const tags = (p.photo_tags || []).map((pt: any) => pt.tag?.name).filter(Boolean)
+            return {
+              filename: p.file_name,
+              description: p.description || '',
+              tags: tags,
+              path: destPath.value ? `${destPath.value}/${p.file_name}` : p.file_name
+            }
+          })
+          return dbPhotos
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch DB photos:', err)
+    }
+    return []
+  }
+
+  // Directly analyze any photo via Gemini Vision AI
+  async function analyzeSinglePhoto(filePath: string) {
+    isAnalyzing.value = true
+    try {
+      let result = null
+      if (typeof (window as any)?.go?.main?.App?.AnalyzePhoto === 'function') {
+        result = await (window as any).go.main.App.AnalyzePhoto(filePath)
+      } else if (typeof (window as any)?.go?.service?.BackupService?.AnalyzePhoto === 'function') {
+        result = await (window as any).go.service.BackupService.AnalyzePhoto(filePath)
+      }
+      return result
+    } catch (err) {
+      console.error('Failed to analyze photo:', err)
+      throw err
+    } finally {
+      isAnalyzing.value = false
     }
   }
 
@@ -360,7 +423,20 @@ export function useBackup() {
         destPath.value = dst
         integrityResult.value = await (window as any).go.main.App.CheckIntegrity(dst)
         destCount.value = integrityResult.value?.total_disk || 0
+        await fetchDbPhotos()
       }
+    }
+
+    // Listen to AI analysis progress events
+    if (typeof (window as any)?.runtime?.EventsOn === 'function') {
+      (window as any).runtime.EventsOn('ai_analysis_progress', (data: any) => {
+        aiProgress.value = {
+          current: data.current || 0,
+          total: data.total || 0,
+          filename: data.filename || ''
+        }
+        isAnalyzing.value = data.current < data.total
+      })
     }
   }
 
@@ -377,6 +453,13 @@ export function useBackup() {
     destFilesList,
     showMissingModal,
     showDestFilesModal,
+    showAiResultsModal,
+    showSuccessModal,
+    successMessage,
+    isAnalyzing,
+    aiProgress,
+    aiError,
+    analyzedPhotosList,
     integrityResult,
     lastSummary,
 
@@ -400,6 +483,8 @@ export function useBackup() {
     loadThumbnails,
     moveSelectedPhotos,
     moveAllPhotos,
+    fetchDbPhotos,
+    analyzeSinglePhoto,
     initBackupState
   }
 }

@@ -1,3 +1,92 @@
+export namespace dto {
+	
+	export class FileItem {
+	    filename: string;
+	    size_bytes: number;
+	    mod_time: string;
+	    full_path: string;
+	    is_image: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new FileItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.filename = source["filename"];
+	        this.size_bytes = source["size_bytes"];
+	        this.mod_time = source["mod_time"];
+	        this.full_path = source["full_path"];
+	        this.is_image = source["is_image"];
+	    }
+	}
+	export class IntegrityResult {
+	    total_db: number;
+	    total_disk: number;
+	    missing_in_disk: string[];
+	    matched_count: number;
+	    is_exact_match: boolean;
+	    alert_message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new IntegrityResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total_db = source["total_db"];
+	        this.total_disk = source["total_disk"];
+	        this.missing_in_disk = source["missing_in_disk"];
+	        this.matched_count = source["matched_count"];
+	        this.is_exact_match = source["is_exact_match"];
+	        this.alert_message = source["alert_message"];
+	    }
+	}
+	export class MoveSummary {
+	    total_files: number;
+	    moved_files: number;
+	    skipped_files: number;
+	    failed_files: number;
+	    duration_ms: number;
+	    duration_formatted: string;
+	    moved_list: string[];
+	    skipped_list: string[];
+	    failed_list: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new MoveSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.total_files = source["total_files"];
+	        this.moved_files = source["moved_files"];
+	        this.skipped_files = source["skipped_files"];
+	        this.failed_files = source["failed_files"];
+	        this.duration_ms = source["duration_ms"];
+	        this.duration_formatted = source["duration_formatted"];
+	        this.moved_list = source["moved_list"];
+	        this.skipped_list = source["skipped_list"];
+	        this.failed_list = source["failed_list"];
+	    }
+	}
+	export class VisionResult {
+	    description: string;
+	    tags: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new VisionResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.description = source["description"];
+	        this.tags = source["tags"];
+	    }
+	}
+
+}
+
 export namespace model {
 	
 	export class Tag {
@@ -102,81 +191,6 @@ export namespace model {
 		}
 	}
 	
-
-}
-
-export namespace service {
-	
-	export class FileItem {
-	    filename: string;
-	    size_bytes: number;
-	    mod_time: string;
-	    full_path: string;
-	    is_image: boolean;
-	
-	    static createFrom(source: any = {}) {
-	        return new FileItem(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.filename = source["filename"];
-	        this.size_bytes = source["size_bytes"];
-	        this.mod_time = source["mod_time"];
-	        this.full_path = source["full_path"];
-	        this.is_image = source["is_image"];
-	    }
-	}
-	export class IntegrityResult {
-	    total_db: number;
-	    total_disk: number;
-	    missing_in_disk: string[];
-	    matched_count: number;
-	    is_exact_match: boolean;
-	    alert_message: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new IntegrityResult(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.total_db = source["total_db"];
-	        this.total_disk = source["total_disk"];
-	        this.missing_in_disk = source["missing_in_disk"];
-	        this.matched_count = source["matched_count"];
-	        this.is_exact_match = source["is_exact_match"];
-	        this.alert_message = source["alert_message"];
-	    }
-	}
-	export class MoveSummary {
-	    total_files: number;
-	    moved_files: number;
-	    skipped_files: number;
-	    failed_files: number;
-	    duration_ms: number;
-	    duration_formatted: string;
-	    moved_list: string[];
-	    skipped_list: string[];
-	    failed_list: string[];
-	
-	    static createFrom(source: any = {}) {
-	        return new MoveSummary(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.total_files = source["total_files"];
-	        this.moved_files = source["moved_files"];
-	        this.skipped_files = source["skipped_files"];
-	        this.failed_files = source["failed_files"];
-	        this.duration_ms = source["duration_ms"];
-	        this.duration_formatted = source["duration_formatted"];
-	        this.moved_list = source["moved_list"];
-	        this.skipped_list = source["skipped_list"];
-	        this.failed_list = source["failed_list"];
-	    }
-	}
 
 }
 

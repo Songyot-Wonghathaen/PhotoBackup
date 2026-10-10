@@ -9,6 +9,7 @@
     </div>
 
     <!-- Header with Back Button -->
+    <template v-if="currentPhoto">
     <header class="detail-header">
       <div class="header-left">
         <h1 class="photo-filename">{{ currentPhoto.filename }}</h1>
@@ -82,13 +83,27 @@
               <span>คำอธิบายจาก AI</span>
             </div>
 
-            <button class="btn-edit" @click="isEditingDesc = !isEditingDesc">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-              </svg>
-              <span>{{ isEditingDesc ? 'เสร็จสิ้น' : 'แก้ไข' }}</span>
-            </button>
+            <div class="header-action-group">
+              <button class="btn-ai-live" :disabled="isAnalyzingLive" @click="handleRunAiAnalysis" title="ส่งภาพให้ Gemini วิเคราะห์คำอธิบายและ Tag ใหม่">
+                <span v-if="!isAnalyzingLive">✨ วิเคราะห์ด้วย AI</span>
+                <span v-else>⏳ กำลังวิเคราะห์...</span>
+              </button>
+              <button
+                v-if="isAnalyzingLive"
+                class="btn-cancel-ai"
+                @click="handleCancelAnalysis"
+                title="ยกเลิกการวิเคราะห์"
+              >
+                ✕ ยกเลิก
+              </button>
+              <button class="btn-edit" @click="isEditingDesc = !isEditingDesc">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+                <span>{{ isEditingDesc ? 'เสร็จสิ้น' : 'แก้ไข' }}</span>
+              </button>
+            </div>
           </div>
 
           <div v-if="!isEditingDesc" class="ai-desc-text">
@@ -162,11 +177,26 @@
         </div>
       </aside>
     </div>
+    </template> <!-- end v-if="currentPhoto" -->
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+
+interface GalleryPhoto {
+  filename: string
+  description: string
+  tags: string[]
+  path: string
+  size: string
+  backupDate: string
+  source: string
+  bgStyle: { background: string }
+  sunStyle: { background: string }
+  waveBack: string
+  waveFront: string
+}
 
 const route = useRoute()
 const isEditingDesc = ref(false)
@@ -241,8 +271,8 @@ const galleryStrip = ref([
   }
 ])
 
-const currentPhoto = computed(() => {
-  return galleryStrip.value[currentPhotoIndex.value] || galleryStrip.value[0]
+const currentPhoto = computed<GalleryPhoto | undefined>(() => {
+  return galleryStrip.value[currentPhotoIndex.value] ?? galleryStrip.value[0]
 })
 
 function selectPhoto(index: number) {
@@ -250,17 +280,52 @@ function selectPhoto(index: number) {
 }
 
 function removeTag(idx: number) {
+  if (!currentPhoto.value) return
   currentPhoto.value.tags.splice(idx, 1)
 }
 
 function promptAddTag() {
+  if (!currentPhoto.value) return
   const newTag = prompt('กรุณาระบุ Tag ใหม่:')
   if (newTag && newTag.trim()) {
     currentPhoto.value.tags.push(newTag.trim())
   }
 }
 
+const isAnalyzingLive = ref(false)
+
+async function handleRunAiAnalysis() {
+  if (!currentPhoto.value) return
+  isAnalyzingLive.value = true
+  try {
+    let result = null
+    const path = currentPhoto.value.path || currentPhoto.value.filename
+    if (typeof (window as any)?.go?.main?.App?.AnalyzePhoto === 'function') {
+      result = await (window as any).go.main.App.AnalyzePhoto(path)
+    } else if (typeof (window as any)?.go?.service?.BackupService?.AnalyzePhoto === 'function') {
+      result = await (window as any).go.service.BackupService.AnalyzePhoto(path)
+    }
+    if (result) {
+      if (result.description) currentPhoto.value.description = result.description
+      if (result.tags && result.tags.length > 0) currentPhoto.value.tags = result.tags
+      alert(`AI วิเคราะห์ภาพสำเร็จ!\n\nคำอธิบาย: ${result.description}\nแท็ก: ${result.tags.join(', ')}`)
+    } else {
+      alert('ไม่สามารถวิเคราะห์ภาพได้ หรือยังไม่ได้ตั้งค่า API Key')
+    }
+  } catch (err: any) {
+    alert('เกิดข้อผิดพลาดในการวิเคราะห์ AI: ' + (err?.message || err))
+  } finally {
+    isAnalyzingLive.value = false
+  }
+}
+
+function handleCancelAnalysis() {
+  isAnalyzingLive.value = false
+  alert('ยกเลิกการวิเคราะห์เรียบร้อยแล้ว')
+}
+
 function handleDelete() {
+  if (!currentPhoto.value) return
   if (confirm(`คุณต้องการลบ ${currentPhoto.value.filename} จากโฟลเดอร์ปลายทางหรือไม่?`)) {
     alert(`จำลองการลบ ${currentPhoto.value.filename} สำเร็จ`)
   }
@@ -513,6 +578,39 @@ function handleDelete() {
   margin: 0 0 14px 0;
 }
 
+.header-action-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-ai-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
+  border: none;
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(79, 70, 229, 0.25);
+}
+
+.btn-ai-live:hover:not(:disabled) {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+.btn-ai-live:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .btn-edit {
   display: inline-flex;
   align-items: center;
@@ -664,6 +762,28 @@ function handleDelete() {
 }
 
 .btn-delete-dest:hover {
+  background: #FEF2F2;
+  border-color: #F87171;
+}
+
+/* Cancel AI Analysis Button */
+.btn-cancel-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #FFFFFF;
+  border: 1px solid #FECACA;
+  color: #DC2626;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-cancel-ai:hover {
   background: #FEF2F2;
   border-color: #F87171;
 }

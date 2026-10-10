@@ -23,6 +23,8 @@ type PhotoRepository interface {
 	MarkPhotoActive(ctx context.Context, dest string, filename string) error
 	MarkPhotoDeleted(ctx context.Context, dest string, filename string) (int64, error)
 	MarkAllPhotosDeleted(ctx context.Context, dest string) (int64, error)
+	UpdatePhotoDescription(ctx context.Context, id int32, description string) error
+	UpdatePhotoDescriptionByFile(ctx context.Context, dest string, filename string, description string) error
 	CleanPhotos(ctx context.Context) error
 }
 
@@ -79,22 +81,24 @@ func destConditions(dest string) []string {
 	return conds
 }
 
-// GetActivePhotosByDest returns all active photos for the destination folder
+// GetActivePhotosByDest returns all active photos for the destination folder with preloaded tags
 func (r *photoRepository) GetActivePhotosByDest(ctx context.Context, dest string) ([]*model.Photo, error) {
 	conds := destConditions(dest)
 	p := r.q.Photo
 	return p.WithContext(ctx).
+		Preload(p.PhotoTags.Tag).
 		Where(p.DestinationPath.In(conds...)).
 		Where(p.Status.Eq("active")).
 		Order(p.ID.Asc()).
 		Find()
 }
 
-// GetAllPhotosByDest returns all photos (active, missing, deleted) for destination history
+// GetAllPhotosByDest returns all photos (active, missing, deleted) for destination history with preloaded tags
 func (r *photoRepository) GetAllPhotosByDest(ctx context.Context, dest string) ([]*model.Photo, error) {
 	conds := destConditions(dest)
 	p := r.q.Photo
 	return p.WithContext(ctx).
+		Preload(p.PhotoTags.Tag).
 		Where(p.DestinationPath.In(conds...)).
 		Order(p.ID.Asc()).
 		Find()
@@ -186,7 +190,26 @@ func (r *photoRepository) MarkAllPhotosDeleted(ctx context.Context, dest string)
 	return info.RowsAffected, err
 }
 
+// UpdatePhotoDescription updates the description text of a specific photo by ID
+func (r *photoRepository) UpdatePhotoDescription(ctx context.Context, id int32, description string) error {
+	p := r.q.Photo
+	_, err := p.WithContext(ctx).Where(p.ID.Eq(id)).Update(p.Description, description)
+	return err
+}
+
+// UpdatePhotoDescriptionByFile updates description by filename+dest (safe when ID not yet known)
+func (r *photoRepository) UpdatePhotoDescriptionByFile(ctx context.Context, dest string, filename string, description string) error {
+	conds := destConditions(dest)
+	p := r.q.Photo
+	_, err := p.WithContext(ctx).
+		Where(p.DestinationPath.In(conds...)).
+		Where(p.FileName.Eq(filename)).
+		Update(p.Description, description)
+	return err
+}
+
 // CleanPhotos truncates/cleans the photos table
 func (r *photoRepository) CleanPhotos(ctx context.Context) error {
 	return r.db.WithContext(ctx).Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Photo{}).Error
 }
+

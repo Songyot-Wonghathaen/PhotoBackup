@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"PhotoVault/controller/dto"
 	modelGen "PhotoVault/model/model"
 	"PhotoVault/repository"
 
@@ -43,48 +45,58 @@ func isImageFile(filename string) bool {
 	return imageExtensions[ext]
 }
 
-type FileItem struct {
-	Filename  string `json:"filename"`
-	SizeBytes int64  `json:"size_bytes"`
-	ModTime   string `json:"mod_time"`
-	FullPath  string `json:"full_path"`
-	IsImage   bool   `json:"is_image"`
-}
-
-type MoveSummary struct {
-	TotalFiles        int      `json:"total_files"`
-	MovedFiles        int      `json:"moved_files"`
-	SkippedFiles      int      `json:"skipped_files"`
-	FailedFiles       int      `json:"failed_files"`
-	DurationMs        int64    `json:"duration_ms"`
-	DurationFormatted string   `json:"duration_formatted"`
-	MovedList         []string `json:"moved_list"`
-	SkippedList       []string `json:"skipped_list"`
-	FailedList        []string `json:"failed_list"`
-}
-
-type IntegrityResult struct {
-	TotalDB       int      `json:"total_db"`
-	TotalDisk     int      `json:"total_disk"`
-	MissingInDisk []string `json:"missing_in_disk"`
-	MatchedCount  int      `json:"matched_count"`
-	IsExactMatch  bool     `json:"is_exact_match"`
-	AlertMessage  string   `json:"alert_message"`
-}
+type FileItem = dto.FileItem
+type MoveSummary = dto.MoveSummary
+type IntegrityResult = dto.IntegrityResult
 
 type BackupService struct {
 	ctx       context.Context
 	photoRepo repository.PhotoRepository
+	tagRepo   repository.TagRepository
+	aiVision  AiVisionService
 	source    string
 	dest      string
 	mu        sync.RWMutex
 }
 
-func NewBackupService(photoRepo repository.PhotoRepository) *BackupService {
-	return &BackupService{
+func NewBackupService(photoRepo repository.PhotoRepository, optionalServices ...interface{}) *BackupService {
+	s := &BackupService{
 		ctx:       context.Background(),
 		photoRepo: photoRepo,
 	}
+	for _, opt := range optionalServices {
+		switch v := opt.(type) {
+		case repository.TagRepository:
+			s.tagRepo = v
+		case AiVisionService:
+			s.aiVision = v
+		}
+	}
+	return s
+}
+
+func (s *BackupService) SetTagRepo(tagRepo repository.TagRepository) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tagRepo = tagRepo
+}
+
+func (s *BackupService) SetAiVision(aiVision AiVisionService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.aiVision = aiVision
+}
+
+// AnalyzePhoto allows analyzing an individual photo directly
+func (s *BackupService) AnalyzePhoto(filePath string) (*VisionResult, error) {
+	s.mu.RLock()
+	ai := s.aiVision
+	s.mu.RUnlock()
+
+	if ai == nil {
+		ai = NewAiVisionService()
+	}
+	return ai.AnalyzePhoto(s.getCtx(), filePath)
 }
 
 func (s *BackupService) SetContext(ctx context.Context) {
@@ -462,6 +474,77 @@ func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) 
 	// Feature 9: Batch Insert into GORM SQLite (photos table)
 	if len(movedPhotos) > 0 {
 		_ = s.photoRepo.AddPhotosInBatch(s.getCtx(), movedPhotos)
+
+		// Part C (Features 12, 13, 14): AI Vision Analysis on Backup
+		s.mu.RLock()
+		ai := s.aiVision
+		tagRepo := s.tagRepo
+		s.mu.RUnlock()
+
+	if ai != nil && ai.IsAvailable() {
+			for idx, p := range movedPhotos {
+				if !isImageFile(p.FileName) {
+					continue
+				}
+				fullDst := filepath.Join(dst, p.FileName)
+				visionRes, err := ai.AnalyzePhoto(s.getCtx(), fullDst)
+				if err != nil {
+					// Feature 14: Handle failure gracefully, leave description blank and continue
+					continue
+				}
+
+				// Feature 13: Save Description and Tags to DB
+				if visionRes != nil {
+					if visionRes.Description != "" {
+						// Use filename+dest query (p.ID is 0 after CreateInBatches)
+						dbErr := s.photoRepo.UpdatePhotoDescriptionByFile(s.getCtx(), dst, p.FileName, visionRes.Description)
+						if dbErr != nil {
+							log.Printf("[AI-Vision] ⚠️ บันทึก description ล้มเหลวสำหรับ %s: %v", p.FileName, dbErr)
+						} else {
+							log.Printf("[AI-Vision] 💾 บันทึก description ลง DB สำเร็จ: %s", p.FileName)
+						}
+					}
+
+					if tagRepo != nil && len(visionRes.Tags) > 0 {
+						// Fetch the real DB record to get actual ID for photo_tags
+						dbPhotos, qErr := s.photoRepo.GetActivePhotosByDest(s.getCtx(), dst)
+						var realID int32
+						if qErr == nil {
+							for _, dbP := range dbPhotos {
+								if strings.EqualFold(dbP.FileName, p.FileName) {
+									realID = dbP.ID
+									break
+								}
+							}
+						}
+						if realID > 0 {
+							createdTags, tagErr := tagRepo.FindOrCreateTags(s.getCtx(), visionRes.Tags)
+							if tagErr == nil && len(createdTags) > 0 {
+								_ = tagRepo.AddPhotoTags(s.getCtx(), realID, createdTags, "ai")
+								log.Printf("[AI-Vision] 🏷️ บันทึก %d tags ลง DB สำเร็จ: %s", len(createdTags), p.FileName)
+							}
+						} else {
+							log.Printf("[AI-Vision] ⚠️ ไม่พบ ID ใน DB สำหรับ %s — ข้าม tag insert", p.FileName)
+						}
+					}
+				}
+
+	// Emit progress event to Frontend
+				if s.ctx != nil {
+					runtime.EventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
+						"current":  idx + 1,
+						"total":    len(movedPhotos),
+						"filename": p.FileName,
+					})
+				}
+
+				// Polite pause to stay smoothly within the free tier rate limit
+				// 2 seconds = ~30 requests/minute, safely under 15 req/min free tier limit
+				if idx < len(movedPhotos)-1 {
+					time.Sleep(2 * time.Second)
+				}
+			}
+		}
 	}
 
 	return summary, nil

@@ -61,7 +61,9 @@ func main() {
 
 	// 2. Initialize Repositories and Services
 	photoRepo := repository.NewPhotoRepository(db)
-	backupService := service.NewBackupService(photoRepo)
+	tagRepo := repository.NewTagRepository(db)
+	aiVisionService := service.NewAiVisionService()
+	backupService := service.NewBackupService(photoRepo, tagRepo, aiVisionService)
 
 	// 3. Create App instance with injected BackupService
 	app := NewApp(backupService)

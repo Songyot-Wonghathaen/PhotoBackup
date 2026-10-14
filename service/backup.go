@@ -708,3 +708,42 @@ func (s *BackupService) CleanAll() error {
 
 	return s.photoRepo.CleanPhotos(s.getCtx())
 }
+
+// SearchPhotosByDescription searches photos by AI-generated description text
+func (s *BackupService) SearchPhotosByDescription(dest string, query string, limit int, offset int) ([]*modelGen.Photo, error) {
+	if dest == "" {
+		dest = s.GetDest()
+	}
+	if dest == "" {
+		return nil, errors.New("destination is not set! Please set destination directory first")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	return s.photoRepo.SearchPhotosByDescription(s.getCtx(), dest, query, limit, offset)
+}
+
+// SearchPhotosByTag searches photos by tag name
+func (s *BackupService) SearchPhotosByTag(dest string, tagName string, limit int, offset int) ([]*modelGen.Photo, error) {
+	if dest == "" {
+		dest = s.GetDest()
+	}
+	if dest == "" {
+		return nil, errors.New("destination is not set! Please set destination directory first")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	return s.photoRepo.SearchPhotosByTag(s.getCtx(), dest, tagName, limit, offset)
+}
+
+// GetTagsWithCount returns all tags with their photo counts for the destination
+func (s *BackupService) GetTagsWithCount(dest string) ([]repository.TagCount, error) {
+	if dest == "" {
+		dest = s.GetDest()
+	}
+	if dest == "" {
+		return nil, errors.New("destination is not set! Please set destination directory first")
+	}
+	return s.photoRepo.GetTagsWithCount(s.getCtx(), dest)
+}

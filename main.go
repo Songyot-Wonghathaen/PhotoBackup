@@ -1,7 +1,9 @@
 package main
 
 import (
+	"PhotoVault/controller"
 	"PhotoVault/repository"
+	"PhotoVault/server"
 	"PhotoVault/service"
 	"PhotoVault/utils"
 	"embed"
@@ -62,11 +64,14 @@ func main() {
 	// 2. Initialize Repositories and Services
 	photoRepo := repository.NewPhotoRepository(db)
 	tagRepo := repository.NewTagRepository(db)
+	galleryRepo := repository.NewGalleryRepository(db)
 	aiVisionService := service.NewAiVisionService()
 	backupService := service.NewBackupService(photoRepo, tagRepo, aiVisionService)
+	galleryService := service.NewGalleryService(galleryRepo)
 
-	// 3. Create App instance with injected BackupService
-	app := NewApp(backupService)
+	// 3. Create App instance with injected services
+	app := NewApp(backupService, galleryService)
+	galleryController := controller.NewGalleryController(galleryService)
 
 	// 4. Run Wails application
 	err = wails.Run(&options.App{
@@ -75,13 +80,14 @@ func main() {
 		Height: 768,
 		AssetServer: &assetserver.Options{
 			Assets:  assets,
-			Handler: createThumbnailHandler(),
+			Handler: server.NewHandler(db, createThumbnailHandler()),
 		},
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup:        app.startup,
 		Bind: []interface{}{
 			app,
 			backupService,
+			galleryController,
 		},
 	})
 

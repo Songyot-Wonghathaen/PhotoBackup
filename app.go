@@ -3,6 +3,7 @@ package main
 import (
 	"PhotoVault/controller/dto"
 	modelGen "PhotoVault/model/model"
+	"PhotoVault/repository"
 	"PhotoVault/service"
 	"PhotoVault/utils"
 	"context"
@@ -13,14 +14,16 @@ import (
 
 // App struct
 type App struct {
-	ctx           context.Context
-	backupService *service.BackupService
+	ctx            context.Context
+	backupService  *service.BackupService
+	galleryService *service.GalleryService
 }
 
 // NewApp creates a new App application struct
-func NewApp(backupService *service.BackupService) *App {
+func NewApp(backupService *service.BackupService, galleryService *service.GalleryService) *App {
 	return &App{
-		backupService: backupService,
+		backupService:  backupService,
+		galleryService: galleryService,
 	}
 }
 
@@ -30,6 +33,9 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	if a.backupService != nil {
 		a.backupService.SetContext(ctx)
+	}
+	if a.galleryService != nil {
+		a.galleryService.SetContext(ctx)
 	}
 }
 
@@ -154,4 +160,19 @@ func (a *App) GetPhotoThumbnails(paths []string) map[string]string {
 // AnalyzePhoto triggers AI vision analysis directly for any photo file
 func (a *App) AnalyzePhoto(fullPath string) (*dto.VisionResult, error) {
 	return a.backupService.AnalyzePhoto(fullPath)
+}
+
+// SearchPhotosByDescription searches photos by AI-generated description text
+func (a *App) SearchPhotosByDescription(dest string, query string, limit int, offset int) ([]*modelGen.Photo, error) {
+	return a.backupService.SearchPhotosByDescription(dest, query, limit, offset)
+}
+
+// SearchPhotosByTag searches photos by tag name
+func (a *App) SearchPhotosByTag(dest string, tagName string, limit int, offset int) ([]*modelGen.Photo, error) {
+	return a.backupService.SearchPhotosByTag(dest, tagName, limit, offset)
+}
+
+// GetTagsWithCount returns all tags with their photo counts for the destination
+func (a *App) GetTagsWithCount(dest string) ([]repository.TagCount, error) {
+	return a.backupService.GetTagsWithCount(dest)
 }

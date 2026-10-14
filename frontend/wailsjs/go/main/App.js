@@ -30,6 +30,10 @@ export function GetSourcePath() {
   return window['go']['main']['App']['GetSourcePath']();
 }
 
+export function GetTagsWithCount(arg1) {
+  return window['go']['main']['App']['GetTagsWithCount'](arg1);
+}
+
 export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
 }
@@ -56,6 +60,14 @@ export function ListSourcePhotos() {
 
 export function MovePhotos(arg1, arg2) {
   return window['go']['main']['App']['MovePhotos'](arg1, arg2);
+}
+
+export function SearchPhotosByDescription(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SearchPhotosByDescription'](arg1, arg2, arg3, arg4);
+}
+
+export function SearchPhotosByTag(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SearchPhotosByTag'](arg1, arg2, arg3, arg4);
 }
 
 export function SelectDestFolder() {

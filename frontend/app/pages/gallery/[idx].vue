@@ -1,314 +1,356 @@
 <template>
   <div class="photo-detail-page">
-    <!-- Notice Banner that this is a Mockup of a friend's part -->
-    <div class="mock-notice">
-      <div class="notice-badge">UI Mockup</div>
-      <span class="notice-text">
-        หน้านี้เป็นภาพตัวอย่าง (ส่วนของเพื่อน): หน้ารายละเอียดภาพ คำอธิบาย AI, ข้อมูลไฟล์ และการแก้ไข Tag
-      </span>
+    <!-- Loading / error states bound to real API status -->
+    <div v-if="photoApi.loading && !photo" class="detail-state detail-loading">
+      <span class="state-spinner"></span>
+      <span>กำลังโหลดข้อมูลรูปภาพ...</span>
+    </div>
+    <div v-else-if="photoApi.error && !photo" class="detail-state detail-error">
+      <span>{{ photoApi.error }}</span>
+      <button class="btn-state-retry" @click="loadDetail()">ลองอีกครั้ง</button>
     </div>
 
     <!-- Header with Back Button -->
-    <template v-if="currentPhoto">
-    <header class="detail-header">
-      <div class="header-left">
-        <h1 class="photo-filename">{{ currentPhoto.filename }}</h1>
-        <p class="header-subtitle">รายละเอียดรูปภาพ</p>
-      </div>
+    <template v-if="photo">
+      <header class="detail-header">
+        <div class="header-left">
+          <h1 class="photo-filename">{{ photo.file_name }}</h1>
+          <p class="header-subtitle">รายละเอียดรูปภาพ</p>
+        </div>
 
-      <NuxtLink to="/gallery" class="btn-back">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="19" y1="12" x2="5" y2="12"/>
-          <polyline points="12 19 5 12 12 5"/>
-        </svg>
-        <span>กลับไปแกลเลอรี่</span>
-      </NuxtLink>
-    </header>
-
-    <!-- Main 2-Column Content Layout -->
-    <div class="detail-content-layout">
-      <!-- Left Column: Big Preview + Thumbnails Strip -->
-      <section class="preview-column">
-        <!-- Big Picture Preview Container -->
-        <div class="main-preview-card" :style="currentPhoto.bgStyle">
-          <div class="preview-sun" :style="currentPhoto.sunStyle"></div>
-          
-          <svg class="preview-wave preview-wave-back" viewBox="0 0 560 200" preserveAspectRatio="none">
-            <path d="M0,90 C120,40 260,130 560,70 L560,200 L0,200 Z" :fill="currentPhoto.waveBack" />
+        <NuxtLink to="/gallery" class="btn-back">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="19" y1="12" x2="5" y2="12" />
+            <polyline points="12 19 5 12 12 5" />
           </svg>
-          <svg class="preview-wave preview-wave-front" viewBox="0 0 560 200" preserveAspectRatio="none">
-            <path d="M0,130 C150,70 320,140 560,95 L560,200 L0,200 Z" :fill="currentPhoto.waveFront" />
-          </svg>
-        </div>
+          <span>กลับไปแกลเลอรี่</span>
+        </NuxtLink>
+      </header>
 
-        <!-- Thumbnails Strip below preview -->
-        <div class="thumbnails-strip">
-          <div 
-            v-for="(thumb, i) in galleryStrip" 
-            :key="thumb.filename"
-            class="thumb-strip-item"
-            :class="{ active: currentPhotoIndex === i }"
-            @click="selectPhoto(i)"
-          >
-            <div class="thumb-mini-art" :style="thumb.bgStyle">
-              <div class="thumb-mini-sun" :style="thumb.sunStyle"></div>
-              <svg class="thumb-mini-wave" viewBox="0 0 100 40" preserveAspectRatio="none">
-                <path d="M0,18 C25,8 55,26 100,14 L100,40 L0,40 Z" :fill="thumb.waveBack" />
-                <path d="M0,26 C30,14 65,28 100,19 L100,40 L0,40 Z" :fill="thumb.waveFront" />
+      <!-- Main 2-Column Content Layout -->
+      <div class="detail-content-layout">
+        <!-- Left Column: Big Preview + Thumbnails Strip -->
+        <section class="preview-column">
+          <!-- Big Picture Preview: original from /image/{id}, gradient art as fallback -->
+          <div class="main-preview-card">
+            <img v-if="!previewFailed" :src="previewUrl" class="preview-img" alt="" @error="previewFailed = true" />
+            <template v-else>
+              <div class="preview-sun"></div>
+              <svg class="preview-wave preview-wave-back" viewBox="0 0 560 200" preserveAspectRatio="none">
+                <path d="M0,90 C120,40 260,130 560,70 L560,200 L0,200 Z" fill="#94A3B8" />
               </svg>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Right Column: AI Description, Tags, Metadata, Actions -->
-      <aside class="sidebar-column">
-        <!-- Backup Status Tag -->
-        <div class="status-badge-row">
-          <span class="badge-backed-up">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="20 6 9 17 4 12"/>
-            </svg>
-            <span>สำรองแล้ว</span>
-          </span>
-        </div>
-
-        <!-- AI Description Card (Figma Screen) -->
-        <div class="info-card ai-desc-card">
-          <div class="card-header-row">
-            <div class="card-title-badge">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" stroke-width="2">
-                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+              <svg class="preview-wave preview-wave-front" viewBox="0 0 560 200" preserveAspectRatio="none">
+                <path d="M0,130 C150,70 320,140 560,95 L560,200 L0,200 Z" fill="#64748B" />
               </svg>
-              <span>คำอธิบายจาก AI</span>
+            </template>
+          </div>
+
+          <!-- Thumbnails Strip below preview: other photos from the gallery API -->
+          <div class="thumbnails-strip">
+            <div v-for="thumb in strip" :key="thumb.id" class="thumb-strip-item"
+              :class="{ active: thumb.id === photoId }" @click="selectPhoto(thumb.id)">
+              <div class="thumb-mini-art">
+                <img :src="thumbUrl(thumb.id)" class="thumb-mini-img" alt="" loading="lazy" />
+              </div>
             </div>
-
-            <div class="header-action-group">
-              <button class="btn-ai-live" :disabled="isAnalyzingLive" @click="handleRunAiAnalysis" title="ส่งภาพให้ Gemini วิเคราะห์คำอธิบายและ Tag ใหม่">
-                <span v-if="!isAnalyzingLive">✨ วิเคราะห์ด้วย AI</span>
-                <span v-else>⏳ กำลังวิเคราะห์...</span>
-              </button>
-              <button
-                v-if="isAnalyzingLive"
-                class="btn-cancel-ai"
-                @click="handleCancelAnalysis"
-                title="ยกเลิกการวิเคราะห์"
-              >
-                ✕ ยกเลิก
-              </button>
-              <button class="btn-edit" @click="isEditingDesc = !isEditingDesc">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                </svg>
-                <span>{{ isEditingDesc ? 'เสร็จสิ้น' : 'แก้ไข' }}</span>
-              </button>
-            </div>
+            <span v-if="strip.length === 0 && !photoApi.loading" class="strip-empty">ไม่มีรูปภาพอื่นในโฟลเดอร์นี้</span>
           </div>
+        </section>
 
-          <div v-if="!isEditingDesc" class="ai-desc-text">
-            {{ currentPhoto.description }}
-          </div>
-          <div v-else class="edit-desc-box">
-            <textarea v-model="currentPhoto.description" class="desc-textarea" rows="3"></textarea>
-          </div>
-        </div>
-
-        <!-- Tags Card -->
-        <div class="info-card tags-card">
-          <div class="card-title-row">
-            <div class="card-title-badge">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4B5563" stroke-width="2">
-                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
-                <line x1="7" y1="7" x2="7.01" y2="7"/>
+        <!-- Right Column: AI Description, Tags, Metadata, Actions -->
+        <aside class="sidebar-column">
+          <!-- Backup Status Tag -->
+          <div class="status-badge-row">
+            <span class="badge-backed-up">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12" />
               </svg>
-              <span class="text-dark">Tags</span>
-            </div>
-          </div>
-
-          <div class="tags-chips-container">
-            <span 
-              v-for="(tag, idx) in currentPhoto.tags" 
-              :key="tag" 
-              class="tag-pill-item"
-            >
-              <span>{{ tag }}</span>
-              <button class="btn-remove-tag" @click="removeTag(idx)" title="ลบแท็ก">✕</button>
+              <span>สำรองแล้ว</span>
             </span>
+          </div>
 
-            <button class="btn-add-tag" @click="promptAddTag">
+          <!-- AI Description Card (Figma Screen) -->
+          <div class="info-card ai-desc-card">
+            <div class="card-header-row">
+              <div class="card-title-badge">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" stroke-width="2">
+                  <path
+                    d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                </svg>
+                <span>คำอธิบายจาก AI</span>
+              </div>
+
+              <div class="header-action-group">
+                <button class="btn-ai-live" :disabled="isAnalyzingLive" @click="handleRunAiAnalysis"
+                  title="ส่งภาพให้ Gemini วิเคราะห์คำอธิบายและ Tag ใหม่">
+                  <span v-if="!isAnalyzingLive">✨ วิเคราะห์ด้วย AI</span>
+                  <span v-else>⏳ กำลังวิเคราะห์...</span>
+                </button>
+                <button v-if="isAnalyzingLive" class="btn-cancel-ai" @click="handleCancelAnalysis"
+                  title="ยกเลิกการวิเคราะห์">
+                  ✕ ยกเลิก
+                </button>
+                <!-- <button class="btn-edit" :disabled="isSavingDesc" @click="toggleEditDesc">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                  <span>{{ isEditingDesc ? (isSavingDesc ? 'กำลังบันทึก...' : 'เสร็จสิ้น') : 'แก้ไข' }}</span>
+                </button> -->
+              </div>
+            </div>
+
+            <div v-if="!isEditingDesc" class="ai-desc-text">
+              {{ photo.description || 'ยังไม่มีคำอธิบาย' }}
+            </div>
+            <div v-else class="edit-desc-box">
+              <textarea v-model="descDraft" class="desc-textarea" rows="3"></textarea>
+            </div>
+          </div>
+
+          <!-- Tags Card -->
+          <div class="info-card tags-card">
+            <div class="card-title-row">
+              <div class="card-title-badge">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4B5563" stroke-width="2">
+                  <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+                  <line x1="7" y1="7" x2="7.01" y2="7" />
+                </svg>
+                <span class="text-dark">Tags</span>
+              </div>
+            </div>
+
+            <div class="tags-chips-container">
+              <span v-for="tag in photo.tags" :key="tag.id" class="tag-pill-item">
+                <span class="tag-source-badge" :class="tag.source === 'user' ? 'src-user' : 'src-ai'">{{ tag.source ===
+                  'user' ?
+                  'คุณ' : 'AI' }}</span>
+                <span>{{ tag.name }}</span>
+                <!-- <button class="btn-remove-tag" :disabled="photoApi.loading" @click="removeTag(tag)" -->
+                <!-- title="ลบแท็ก">✕</button> -->
+              </span>
+
+              <!-- <button v-if="!isAddingTag" class="btn-add-tag" @click="openAddTag()">
               <span>+ เพิ่ม Tag</span>
+            </button> -->
+              <!-- <div v-else class="add-tag-box">
+              <input
+                v-model="newTag"
+                class="tag-input"
+                placeholder="พิมพ์ชื่อ Tag แล้วกดเพิ่ม"
+                @input="onTagInput()"
+                @keyup.enter="submitTag()"
+              />
+              <div v-if="tagSuggestions.length > 0" class="tag-suggest-list">
+                <button
+                  v-for="s in tagSuggestions"
+                  :key="s"
+                  class="tag-suggest-item"
+                  @click="pickSuggestion(s)"
+                >
+                  {{ s }}
+                </button>
+              </div>
+              <div class="add-tag-actions">
+                <button class="btn-tag-confirm" :disabled="photoApi.loading || !newTag.trim()" @click="submitTag()">เพิ่ม</button>
+                <button class="btn-tag-cancel" :disabled="photoApi.loading" @click="isAddingTag = false">ยกเลิก</button>
+              </div>
+            </div> -->
+            </div>
+          </div>
+
+          <!-- File Metadata Card (ข้อมูลไฟล์) -->
+          <div class="info-card file-metadata-card">
+            <h3 class="card-title-heading">ข้อมูลไฟล์</h3>
+            <div class="meta-list">
+              <div class="meta-row">
+                <span class="meta-label">ที่เก็บ</span>
+                <span class="meta-value path-val" :title="photo.full_path">{{ photo.full_path }}</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">ขนาด</span>
+                <span class="meta-value">{{ formatBytes(photo.size_bytes) }}</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">สำรองเมื่อ</span>
+                <span class="meta-value">{{ formatBackedUpAt(photo.backed_up_at) }}</span>
+              </div>
+              <div class="meta-row">
+                <span class="meta-label">ต้นทาง</span>
+                <span class="meta-value">{{ photo.destination_path }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Delete Action Button -->
+          <div class="delete-action-row">
+            <button class="btn-delete-dest" @click="handleDelete">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+              <span>ลบจากปลายทาง</span>
             </button>
           </div>
-        </div>
-
-        <!-- File Metadata Card (ข้อมูลไฟล์) -->
-        <div class="info-card file-metadata-card">
-          <h3 class="card-title-heading">ข้อมูลไฟล์</h3>
-          <div class="meta-list">
-            <div class="meta-row">
-              <span class="meta-label">ที่เก็บ</span>
-              <span class="meta-value path-val" :title="currentPhoto.path">{{ currentPhoto.path }}</span>
-            </div>
-            <div class="meta-row">
-              <span class="meta-label">ขนาด</span>
-              <span class="meta-value">{{ currentPhoto.size }}</span>
-            </div>
-            <div class="meta-row">
-              <span class="meta-label">สำรองเมื่อ</span>
-              <span class="meta-value">{{ currentPhoto.backupDate }}</span>
-            </div>
-            <div class="meta-row">
-              <span class="meta-label">ต้นทาง</span>
-              <span class="meta-value">{{ currentPhoto.source }}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Delete Action Button -->
-        <div class="delete-action-row">
-          <button class="btn-delete-dest" @click="handleDelete">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="3 6 5 6 21 6"/>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-            </svg>
-            <span>ลบจากปลายทาง</span>
-          </button>
-        </div>
-      </aside>
-    </div>
+        </aside>
+      </div>
     </template> <!-- end v-if="currentPhoto" -->
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-
-interface GalleryPhoto {
-  filename: string
-  description: string
-  tags: string[]
-  path: string
-  size: string
-  backupDate: string
-  source: string
-  bgStyle: { background: string }
-  sunStyle: { background: string }
-  waveBack: string
-  waveFront: string
-}
+import { ref, computed, onMounted, watch } from 'vue'
+import { useBackup } from '~/composables/useBackup'
+import { usePhotoApi, imageUrl, thumbUrl, formatBackedUpAt } from '~/composables/usePhotoApi'
+import type { PhotoDetail, PhotoListItem, TagItem } from '~/composables/usePhotoApi'
+import { formatBytes } from '~/utils/formatters'
 
 const route = useRoute()
+const { destPath } = useBackup()
+const photoApi = usePhotoApi()
+
+const photoId = computed(() => Number(route.params.idx))
+const photo = ref<PhotoDetail | null>(null)
+const strip = ref<PhotoListItem[]>([])
+
+// Description editing (Feature 19)
 const isEditingDesc = ref(false)
+const descDraft = ref('')
+const isSavingDesc = ref(false)
 
-const currentPhotoIndex = ref(0)
+// Real image loading with fallback to the gradient art
+const previewFailed = ref(false)
+const previewUrl = computed(() => (photo.value ? imageUrl(photo.value.id) : ''))
 
-const galleryStrip = ref([
-  {
-    filename: 'beach_trip.png',
-    description: 'ชายหาดทรายขาวกับทะเลสีฟ้าใสในวันที่ท้องฟ้าโปร่ง มีเมฆบาง ๆ และภูเขาอยู่ไกล ๆ เหมาะกับบรรยากาศท่องเที่ยวพักผ่อน',
-    tags: ['ชายหาด', 'ทะเล', 'ท้องฟ้า', 'ภูเขา', 'ท่องเที่ยว', 'พักผ่อน'],
-    path: '~/Pictures/PhotoBackup/beach_trip.png',
-    size: '3.4 MB',
-    backupDate: '3 ต.ค. 2569 07:21',
-    source: 'Flash Drive · /DCIM',
-    bgStyle: { background: 'linear-gradient(180deg, #38BDF8 0%, #BAE6FD 100%)' },
-    sunStyle: { background: '#FFFFFF' },
-    waveBack: '#0EA5E9',
-    waveFront: '#0369A1'
-  },
-  {
-    filename: 'sunset.jpg',
-    description: 'หาดทรายขาวกับท้องฟ้าสีส้มยามพระอาทิตย์ตก มีเรือเล็กลอยอยู่ไกล ๆ ทิวทัศน์เงียบสงบ',
-    tags: ['ชายหาด', 'พระอาทิตย์ตก', 'ทะเล'],
-    path: '~/Pictures/PhotoBackup/sunset.jpg',
-    size: '4.2 MB',
-    backupDate: '3 ต.ค. 2569 07:22',
-    source: 'Flash Drive · /DCIM',
-    bgStyle: { background: 'linear-gradient(180deg, #F97316 0%, #FDBA74 100%)' },
-    sunStyle: { background: '#FEF08A' },
-    waveBack: '#7C2D12',
-    waveFront: '#431407'
-  },
-  {
-    filename: 'family.jpg',
-    description: 'ครอบครัวนั่งเล่นบนชายหาดพร้อมร่มสีสันสดใส บรรยากาศอบอุ่น',
-    tags: ['ชายหาด', 'ครอบครัว', 'พักผ่อน'],
-    path: '~/Pictures/PhotoBackup/family.jpg',
-    size: '2.8 MB',
-    backupDate: '3 ต.ค. 2569 07:23',
-    source: 'Flash Drive · /DCIM',
-    bgStyle: { background: 'linear-gradient(180deg, #BFDBFE 0%, #E0E7FF 100%)' },
-    sunStyle: { background: '#FFFFFF' },
-    waveBack: '#CBD5E1',
-    waveFront: '#94A3B8'
-  },
-  {
-    filename: 'IMG_2041.jpg',
-    description: 'เงาของต้นมะพร้าวทอดยาวบนผืนทรายตอนใกล้ค่ำ แดดร่มลมตก',
-    tags: ['ชายหาด', 'ต้นไม้', 'ธรรมชาติ'],
-    path: '~/Pictures/PhotoBackup/IMG_2041.jpg',
-    size: '3.1 MB',
-    backupDate: '3 ต.ค. 2569 07:24',
-    source: 'Flash Drive · /DCIM',
-    bgStyle: { background: 'linear-gradient(180deg, #FDBA74 0%, #FED7AA 100%)' },
-    sunStyle: { background: '#FEF08A' },
-    waveBack: '#C2410C',
-    waveFront: '#9A3412'
-  },
-  {
-    filename: 'mountain.jpg',
-    description: 'ทุ่งหญ้าเขียวขจีริมเชิงเขา อากาศบริสุทธิ์ยามสาย',
-    tags: ['ภูเขา', 'ต้นไม้', 'เดินเล่น'],
-    path: '~/Pictures/PhotoBackup/mountain.jpg',
-    size: '3.9 MB',
-    backupDate: '3 ต.ค. 2569 07:25',
-    source: 'Flash Drive · /DCIM',
-    bgStyle: { background: 'linear-gradient(180deg, #A7F3D0 0%, #D1FAE5 100%)' },
-    sunStyle: { background: '#FDE047' },
-    waveBack: '#65A30D',
-    waveFront: '#3F6212'
+// Tag editing with autocomplete (Feature 19)
+const isAddingTag = ref(false)
+const newTag = ref('')
+const tagSuggestions = ref<string[]>([])
+
+async function loadDetail() {
+  if (!photoId.value || Number.isNaN(photoId.value)) return
+  const detail = await photoApi.getPhotoDetail(photoId.value)
+  if (detail) {
+    photo.value = detail
+    previewFailed.value = false
   }
-])
-
-const currentPhoto = computed<GalleryPhoto | undefined>(() => {
-  return galleryStrip.value[currentPhotoIndex.value] ?? galleryStrip.value[0]
-})
-
-function selectPhoto(index: number) {
-  currentPhotoIndex.value = index
 }
 
-function removeTag(idx: number) {
-  if (!currentPhoto.value) return
-  currentPhoto.value.tags.splice(idx, 1)
+// Other photos for the thumbnails strip
+async function loadStrip() {
+  if (!destPath.value) return
+  const result = await photoApi.searchPhotos(destPath.value, { query: '', tag_ids: [], page: 1, page_size: 8 })
+  if (result) strip.value = result.items || []
 }
 
-function promptAddTag() {
-  if (!currentPhoto.value) return
-  const newTag = prompt('กรุณาระบุ Tag ใหม่:')
-  if (newTag && newTag.trim()) {
-    currentPhoto.value.tags.push(newTag.trim())
+function selectPhoto(id: number) {
+  if (id !== photoId.value) navigateTo(`/gallery/${id}`)
+}
+
+// Feature 19: edit description, save through the backend and refresh from its result
+function toggleEditDesc() {
+  if (isEditingDesc.value) {
+    saveDescription()
+    return
+  }
+  descDraft.value = photo.value?.description || ''
+  isEditingDesc.value = true
+}
+
+async function saveDescription() {
+  if (!photo.value || isSavingDesc.value) return
+  const next = descDraft.value.trim()
+  const previous = photo.value.description
+  isSavingDesc.value = true
+  try {
+    photo.value = { ...photo.value, description: next }
+    await photoApi.updateDescription(photo.value.id, next)
+    await loadDetail()
+  } catch (err: any) {
+    photo.value = { ...photo.value, description: previous }
+    alert('บันทึกคำอธิบายไม่สำเร็จ: ' + (err?.message || 'ข้อผิดพลาดไม่ทราบสาเหตุ'))
+  } finally {
+    isSavingDesc.value = false
+    isEditingDesc.value = false
+  }
+}
+
+// Feature 19: add tag with autocomplete suggestions, update UI from backend return
+function openAddTag() {
+  isAddingTag.value = true
+  newTag.value = ''
+  tagSuggestions.value = []
+}
+
+async function onTagInput() {
+  const q = newTag.value.trim()
+  if (!q) {
+    tagSuggestions.value = []
+    return
+  }
+  const list = await photoApi.suggestTags(q, 8)
+  if (list) {
+    const owned = new Set((photo.value?.tags || []).map((t) => t.id))
+    tagSuggestions.value = list.filter((t) => !owned.has(t.id)).map((t) => t.name)
+  }
+}
+
+function pickSuggestion(name: string) {
+  newTag.value = name
+  tagSuggestions.value = []
+}
+
+async function submitTag() {
+  const name = newTag.value.trim()
+  if (!name || !photo.value) return
+  const updated = await photoApi.addTag(photo.value.id, name)
+  if (updated) {
+    photo.value = updated
+    newTag.value = ''
+    isAddingTag.value = false
+    tagSuggestions.value = []
+  } else {
+    alert('เพิ่ม Tag ไม่สำเร็จ: ' + (photoApi.error.value || 'ข้อผิดพลาดไม่ทราบสาเหตุ'))
+  }
+}
+
+// Feature 19: remove tag with rollback when the backend rejects it
+async function removeTag(tag: TagItem) {
+  if (!photo.value) return
+  const previous = photo.value.tags
+  photo.value = { ...photo.value, tags: previous.filter((t) => t.id !== tag.id) }
+  try {
+    await photoApi.removeTag(photo.value.id, tag.id)
+    await loadDetail()
+  } catch (err: any) {
+    photo.value = { ...photo.value, tags: previous }
+    alert('ลบ Tag ไม่สำเร็จ: ' + (err?.message || 'ข้อผิดพลาดไม่ทราบสาเหตุ'))
   }
 }
 
 const isAnalyzingLive = ref(false)
 
 async function handleRunAiAnalysis() {
-  if (!currentPhoto.value) return
+  if (!photo.value) return
   isAnalyzingLive.value = true
   try {
     let result = null
-    const path = currentPhoto.value.path || currentPhoto.value.filename
+    const path = photo.value.full_path || photo.value.file_name
     if (typeof (window as any)?.go?.main?.App?.AnalyzePhoto === 'function') {
       result = await (window as any).go.main.App.AnalyzePhoto(path)
     } else if (typeof (window as any)?.go?.service?.BackupService?.AnalyzePhoto === 'function') {
       result = await (window as any).go.service.BackupService.AnalyzePhoto(path)
     }
     if (result) {
-      if (result.description) currentPhoto.value.description = result.description
-      if (result.tags && result.tags.length > 0) currentPhoto.value.tags = result.tags
-      alert(`AI วิเคราะห์ภาพสำเร็จ!\n\nคำอธิบาย: ${result.description}\nแท็ก: ${result.tags.join(', ')}`)
+      if (result.description) {
+        photo.value = { ...photo.value, description: result.description }
+        await photoApi.updateDescription(photo.value.id, result.description)
+      }
+      alert(`AI วิเคราะห์ภาพสำเร็จ!\n\nคำอธิบาย: ${result.description}\nแท็ก: ${(result.tags || []).join(', ')}`)
     } else {
       alert('ไม่สามารถวิเคราะห์ภาพได้ หรือยังไม่ได้ตั้งค่า API Key')
     }
@@ -325,11 +367,21 @@ function handleCancelAnalysis() {
 }
 
 function handleDelete() {
-  if (!currentPhoto.value) return
-  if (confirm(`คุณต้องการลบ ${currentPhoto.value.filename} จากโฟลเดอร์ปลายทางหรือไม่?`)) {
-    alert(`จำลองการลบ ${currentPhoto.value.filename} สำเร็จ`)
+  if (!photo.value) return
+  if (confirm(`คุณต้องการลบ ${photo.value.file_name} จากโฟลเดอร์ปลายทางหรือไม่?`)) {
+    alert('การลบไฟล์ในปลายทางจัดการได้ที่หน้าประวัติ & ตรวจสอบ')
   }
 }
+
+onMounted(async () => {
+  await loadDetail()
+  await loadStrip()
+})
+
+watch(photoId, async () => {
+  await loadDetail()
+  await loadStrip()
+})
 </script>
 
 <style scoped>
@@ -345,33 +397,199 @@ function handleDelete() {
   font-family: 'Prompt', 'Inter', sans-serif;
 }
 
-/* Mock Notice Banner */
-.mock-notice {
-  background: #EEF2FF;
-  border: 1px dashed #6366F1;
-  border-radius: 10px;
-  padding: 8px 14px;
+/* Real data states: loading / error */
+.detail-state {
+  background: #FFFFFF;
+  border: 1px dashed #C7D2FE;
+  border-radius: 14px;
+  padding: 32px 20px;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  margin-bottom: 16px;
-}
-
-.notice-badge {
-  background: #4F46E5;
-  color: #FFFFFF;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.notice-text {
-  font-size: 12.5px;
-  color: #3730A3;
+  font-size: 13.5px;
+  color: #6B7280;
   font-weight: 500;
+  box-sizing: border-box;
+}
+
+.detail-state.detail-error {
+  border-color: #FECACA;
+  color: #DC2626;
+}
+
+.state-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #C7D2FE;
+  border-top-color: #4F46E5;
+  border-radius: 50%;
+  animation: gallery-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes gallery-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.btn-state-retry {
+  background: #4F46E5;
+  border: none;
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.btn-state-retry:hover {
+  background: #4338CA;
+}
+
+.strip-empty {
+  font-size: 12px;
+  color: #94A3B8;
+  align-self: center;
+  padding-left: 4px;
+}
+
+/* Real preview image from /image/{id} */
+.preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background: #F8FAFC;
+}
+
+/* Real strip thumbnails from /thumb/{id} */
+.thumb-mini-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  background: #F1F5F9;
+}
+
+/* Tag source badges (AI vs user) */
+.tag-source-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  letter-spacing: 0.3px;
+}
+
+.tag-source-badge.src-ai {
+  background: #EEF2FF;
+  color: #4F46E5;
+}
+
+.tag-source-badge.src-user {
+  background: #DCFCE7;
+  color: #15803D;
+}
+
+/* Inline add-tag box with autocomplete */
+.add-tag-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tag-input {
+  border: 1px solid #CBD5E1;
+  border-radius: 9999px;
+  padding: 5px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  color: #1E293B;
+  width: 180px;
+  outline: none;
+  background: #FFFFFF;
+}
+
+.tag-input:focus {
+  border-color: #4F46E5;
+}
+
+.tag-suggest-list {
+  position: absolute;
+  top: 34px;
+  left: 0;
+  z-index: 5;
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  border-radius: 10px;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  overflow: hidden;
+}
+
+.tag-suggest-item {
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: 12px;
+  color: #334155;
+  text-align: left;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+
+.tag-suggest-item:hover {
+  background: #EEF2FF;
+  color: #4338CA;
+}
+
+.add-tag-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-tag-confirm,
+.btn-tag-cancel {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-tag-confirm {
+  background: #4F46E5;
+  border: none;
+  color: #FFFFFF;
+}
+
+.btn-tag-confirm:hover:not(:disabled) {
+  background: #4338CA;
+}
+
+.btn-tag-confirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-tag-cancel {
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  color: #374151;
+}
+
+.btn-tag-cancel:hover:not(:disabled) {
+  background: #F9FAFB;
 }
 
 /* Header */
@@ -493,23 +711,6 @@ function handleDelete() {
   position: relative;
   width: 100%;
   height: 100%;
-}
-
-.thumb-mini-sun {
-  position: absolute;
-  top: 14px;
-  left: 38%;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-}
-
-.thumb-mini-wave {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  height: 28px;
 }
 
 /* Right Column: Cards */

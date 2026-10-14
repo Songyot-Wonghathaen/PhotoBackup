@@ -26,6 +26,10 @@ export function GetSource() {
   return window['go']['service']['BackupService']['GetSource']();
 }
 
+export function GetTagsWithCount(arg1) {
+  return window['go']['service']['BackupService']['GetTagsWithCount'](arg1);
+}
+
 export function ListDB(arg1) {
   return window['go']['service']['BackupService']['ListDB'](arg1);
 }
@@ -48,6 +52,14 @@ export function ListSourceFiles() {
 
 export function Move(arg1, arg2) {
   return window['go']['service']['BackupService']['Move'](arg1, arg2);
+}
+
+export function SearchPhotosByDescription(arg1, arg2, arg3, arg4) {
+  return window['go']['service']['BackupService']['SearchPhotosByDescription'](arg1, arg2, arg3, arg4);
+}
+
+export function SearchPhotosByTag(arg1, arg2, arg3, arg4) {
+  return window['go']['service']['BackupService']['SearchPhotosByTag'](arg1, arg2, arg3, arg4);
 }
 
 export function SelectDestDialog() {

@@ -9,6 +9,7 @@ import (
 	"PhotoVault/model/model"
 	"PhotoVault/model/query"
 
+	"gorm.io/gen"
 	"gorm.io/gorm"
 )
 
@@ -26,6 +27,14 @@ type PhotoRepository interface {
 	UpdatePhotoDescription(ctx context.Context, id int32, description string) error
 	UpdatePhotoDescriptionByFile(ctx context.Context, dest string, filename string, description string) error
 	CleanPhotos(ctx context.Context) error
+	SearchPhotosByDescription(ctx context.Context, dest string, query string, limit int, offset int) ([]*model.Photo, error)
+	SearchPhotosByTag(ctx context.Context, dest string, tagName string, limit int, offset int) ([]*model.Photo, error)
+	GetTagsWithCount(ctx context.Context, dest string) ([]TagCount, error)
+}
+
+type TagCount struct {
+	Name  string
+	Count int
 }
 
 type photoRepository struct {
@@ -213,3 +222,106 @@ func (r *photoRepository) CleanPhotos(ctx context.Context) error {
 	return r.db.WithContext(ctx).Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Photo{}).Error
 }
 
+// SearchPhotosByDescription searches photos by AI-generated description text (case-insensitive partial match)
+func (r *photoRepository) SearchPhotosByDescription(ctx context.Context, dest string, query string, limit int, offset int) ([]*model.Photo, error) {
+	conds := destConditions(dest)
+	if len(conds) == 0 {
+		return nil, nil
+	}
+	p := r.q.Photo
+	q := p.WithContext(ctx).
+		Preload(p.PhotoTags.Tag).
+		Where(p.DestinationPath.In(conds...)).
+		Where(p.Status.Eq("active"))
+
+	if query != "" {
+		// Case-insensitive search in description using LIKE
+		q = q.Where(p.Description.Like("%" + query + "%"))
+	}
+
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if offset > 0 {
+		q = q.Offset(offset)
+	}
+
+	return q.Order(p.BackedUpAt.Desc()).Find()
+}
+
+// SearchPhotosByTag searches photos by tag name
+func (r *photoRepository) SearchPhotosByTag(ctx context.Context, dest string, tagName string, limit int, offset int) ([]*model.Photo, error) {
+	conds := destConditions(dest)
+	if len(conds) == 0 || tagName == "" {
+		return nil, nil
+	}
+	p := r.q.Photo
+	pt := r.q.PhotoTag
+	t := r.q.Tag
+
+	// Subquery to find photo IDs that have the tag
+	tagIDs := t.WithContext(ctx).
+		Select(t.ID).
+		Where(t.Name.Eq(tagName))
+
+	subQuery := pt.WithContext(ctx).
+		Select(pt.PhotoID).
+		Where(gen.Columns{pt.TagID}.In(tagIDs))
+
+	q := p.WithContext(ctx).
+		Preload(p.PhotoTags.Tag).
+		Where(p.DestinationPath.In(conds...)).
+		Where(p.Status.Eq("active")).
+		Where(gen.Columns{p.ID}.In(subQuery))
+
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if offset > 0 {
+		q = q.Offset(offset)
+	}
+
+	return q.Order(p.BackedUpAt.Desc()).Find()
+}
+
+// GetTagsWithCount returns all tags used by photos in the destination with their photo counts
+func (r *photoRepository) GetTagsWithCount(ctx context.Context, dest string) ([]TagCount, error) {
+	conds := destConditions(dest)
+	if len(conds) == 0 {
+		return nil, nil
+	}
+
+	p := r.q.Photo
+	pt := r.q.PhotoTag
+	t := r.q.Tag
+
+	// Subquery: active photo IDs in this destination
+	photoIDs := p.WithContext(ctx).
+		Select(p.ID).
+		Where(p.DestinationPath.In(conds...)).
+		Where(p.Status.Eq("active"))
+
+	// Query: tags used by these photos with count
+	rows, err := t.WithContext(ctx).
+		Select(t.Name, pt.PhotoID.Count().As("photo_count")).
+		LeftJoin(pt, pt.TagID.EqCol(t.ID)).
+		Where(gen.Columns{pt.PhotoID}.In(photoIDs)).
+		Group(t.ID, t.Name).
+		Order(pt.PhotoID.Count().Desc()).
+		Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []TagCount
+	for rows.Next() {
+		var name string
+		var count int
+		if err := rows.Scan(&name, &count); err != nil {
+			return nil, err
+		}
+		result = append(result, TagCount{Name: name, Count: count})
+	}
+	return result, nil
+}

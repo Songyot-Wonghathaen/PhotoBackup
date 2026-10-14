@@ -70,6 +70,155 @@ export namespace dto {
 	        this.failed_list = source["failed_list"];
 	    }
 	}
+	export class TagItem {
+	    id: number;
+	    name: string;
+	    count: number;
+	    source: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new TagItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.count = source["count"];
+	        this.source = source["source"];
+	    }
+	}
+	export class PhotoDetail {
+	    id: number;
+	    file_name: string;
+	    destination_path: string;
+	    full_path: string;
+	    thumb_url: string;
+	    description: string;
+	    tags: TagItem[];
+	    size_bytes: number;
+	    sha256: string;
+	    status: string;
+	    backed_up_at: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PhotoDetail(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.file_name = source["file_name"];
+	        this.destination_path = source["destination_path"];
+	        this.full_path = source["full_path"];
+	        this.thumb_url = source["thumb_url"];
+	        this.description = source["description"];
+	        this.tags = this.convertValues(source["tags"], TagItem);
+	        this.size_bytes = source["size_bytes"];
+	        this.sha256 = source["sha256"];
+	        this.status = source["status"];
+	        this.backed_up_at = source["backed_up_at"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PhotoListItem {
+	    id: number;
+	    file_name: string;
+	    full_path: string;
+	    thumb_url: string;
+	    description: string;
+	    tags: string[];
+	    backed_up_at: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PhotoListItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.file_name = source["file_name"];
+	        this.full_path = source["full_path"];
+	        this.thumb_url = source["thumb_url"];
+	        this.description = source["description"];
+	        this.tags = source["tags"];
+	        this.backed_up_at = source["backed_up_at"];
+	    }
+	}
+	export class SearchParams {
+	    query: string;
+	    tag_ids: number[];
+	    page: number;
+	    page_size: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SearchParams(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.query = source["query"];
+	        this.tag_ids = source["tag_ids"];
+	        this.page = source["page"];
+	        this.page_size = source["page_size"];
+	    }
+	}
+	export class SearchResult {
+	    items: PhotoListItem[];
+	    total: number;
+	    page: number;
+	    page_size: number;
+	    total_pages: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SearchResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.items = this.convertValues(source["items"], PhotoListItem);
+	        this.total = source["total"];
+	        this.page = source["page"];
+	        this.page_size = source["page_size"];
+	        this.total_pages = source["total_pages"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class VisionResult {
 	    description: string;
 	    tags: string[];
@@ -191,6 +340,25 @@ export namespace model {
 		}
 	}
 	
+
+}
+
+export namespace repository {
+	
+	export class TagCount {
+	    Name: string;
+	    Count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TagCount(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Name = source["Name"];
+	        this.Count = source["Count"];
+	    }
+	}
 
 }
 

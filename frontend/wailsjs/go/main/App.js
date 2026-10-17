@@ -14,6 +14,10 @@ export function DeletePhotos(arg1, arg2) {
   return window['go']['main']['App']['DeletePhotos'](arg1, arg2);
 }
 
+export function DeletePhotosFromDest(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DeletePhotosFromDest'](arg1, arg2, arg3);
+}
+
 export function GetDestPath() {
   return window['go']['main']['App']['GetDestPath']();
 }
@@ -36,6 +40,10 @@ export function GetTagsWithCount(arg1) {
 
 export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
+}
+
+export function ListAllDBPhotos(arg1) {
+  return window['go']['main']['App']['ListAllDBPhotos'](arg1);
 }
 
 export function ListDBPhotos(arg1) {

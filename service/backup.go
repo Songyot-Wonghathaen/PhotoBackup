@@ -316,6 +316,18 @@ func (s *BackupService) ListDB(destPath string) ([]*modelGen.Photo, error) {
 	return s.photoRepo.GetActivePhotosByDest(s.getCtx(), destPath)
 }
 
+// ListAllDB lists all photo records (active, missing, deleted) for destPath (Feature 20 & 24)
+func (s *BackupService) ListAllDB(destPath string) ([]*modelGen.Photo, error) {
+	if destPath == "" {
+		destPath = s.GetDest()
+	}
+	if destPath == "" {
+		return nil, errors.New("destination is not set! Please set destination directory first")
+	}
+	return s.photoRepo.GetAllPhotosByDest(s.getCtx(), destPath)
+}
+
+
 // Feature 6, 7, 8, 9, 11: Move with Worker Pool, timer, cross-drive copy, duplicate check, batch insert
 func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) {
 	src := s.GetSource()
@@ -653,6 +665,7 @@ func fastFileHash(path string) string {
 // CheckIntegrity implements Feature 5 & 21:
 // Compares database records with physical files on disk, updates 'missing' status in DB if not found
 func (s *BackupService) CheckIntegrity(destPath string) (IntegrityResult, error) {
+	start := time.Now()
 	if destPath == "" {
 		destPath = s.GetDest()
 	}
@@ -660,7 +673,7 @@ func (s *BackupService) CheckIntegrity(destPath string) (IntegrityResult, error)
 		return IntegrityResult{}, errors.New("destination is not set! Please set destination directory first")
 	}
 
-	dbPhotos, err := s.photoRepo.GetActivePhotosByDest(s.getCtx(), destPath)
+	allPhotos, err := s.photoRepo.GetAllPhotosByDest(s.getCtx(), destPath)
 	if err != nil {
 		return IntegrityResult{}, err
 	}
@@ -678,9 +691,17 @@ func (s *BackupService) CheckIntegrity(destPath string) (IntegrityResult, error)
 	var missingInDisk []string
 	matched := 0
 
-	for _, p := range dbPhotos {
+	for _, p := range allPhotos {
+		if p.Status == "deleted" {
+			// Intentionally deleted photos are not counted as missing
+			continue
+		}
 		if diskMap[strings.ToLower(p.FileName)] {
 			matched++
+			if p.Status == "missing" {
+				// File restored to disk: mark active again in DB
+				_ = s.photoRepo.MarkPhotoActive(s.getCtx(), destPath, p.FileName)
+			}
 		} else {
 			missingInDisk = append(missingInDisk, p.FileName)
 			// Update status in DB to 'missing'
@@ -688,12 +709,18 @@ func (s *BackupService) CheckIntegrity(destPath string) (IntegrityResult, error)
 		}
 	}
 
+	duration := time.Since(start)
+	ms := duration.Milliseconds()
+	formattedDuration := fmt.Sprintf("%.1f ms", float64(duration.Microseconds())/1000.0)
+
 	result := IntegrityResult{
-		TotalDB:       len(dbPhotos),
-		TotalDisk:     len(diskFiles),
-		MissingInDisk: missingInDisk,
-		MatchedCount:  matched,
-		IsExactMatch:  len(missingInDisk) == 0,
+		TotalDB:           len(allPhotos),
+		TotalDisk:         len(diskFiles),
+		MissingInDisk:     missingInDisk,
+		MatchedCount:      matched,
+		IsExactMatch:      len(missingInDisk) == 0,
+		DurationMs:        ms,
+		DurationFormatted: formattedDuration,
 	}
 
 	if len(missingInDisk) > 0 {
@@ -705,25 +732,32 @@ func (s *BackupService) CheckIntegrity(destPath string) (IntegrityResult, error)
 	return result, nil
 }
 
-// Delete removes files from destination disk and sets status = 'deleted' in DB
+// Delete removes files from destination disk and sets status = 'deleted' in DB (Feature 23 & 25)
 func (s *BackupService) Delete(targets []string, isAll bool) (int, error) {
-	dst := s.GetDest()
-	if dst == "" {
+	return s.DeleteFromDest(s.GetDest(), targets, isAll)
+}
+
+// DeleteFromDest removes files from the given destination disk and sets status = 'deleted' in DB (Feature 23 & 25)
+func (s *BackupService) DeleteFromDest(destPath string, targets []string, isAll bool) (int, error) {
+	if destPath == "" {
+		destPath = s.GetDest()
+	}
+	if destPath == "" {
 		return 0, errors.New("destination is not set! Please set destination directory first")
 	}
 
 	deletedCount := 0
 
 	if isAll {
-		diskFiles, _ := listDirectoryFiles(dst)
+		diskFiles, _ := listDirectoryFiles(destPath)
 		for _, f := range diskFiles {
-			p := filepath.Join(dst, f)
+			p := filepath.Join(destPath, f)
 			if err := os.Remove(p); err == nil {
 				deletedCount++
 			}
 		}
 		// Soft-delete in DB (update status = 'deleted' to preserve history)
-		_, _ = s.photoRepo.MarkAllPhotosDeleted(s.getCtx(), dst)
+		_, _ = s.photoRepo.MarkAllPhotosDeleted(s.getCtx(), destPath)
 		return deletedCount, nil
 	}
 
@@ -732,15 +766,16 @@ func (s *BackupService) Delete(targets []string, isAll bool) (int, error) {
 		if fname == "" {
 			continue
 		}
-		p := filepath.Join(dst, fname)
+		p := filepath.Join(destPath, fname)
 		if err := os.Remove(p); err == nil {
 			deletedCount++
 		}
-		_, _ = s.photoRepo.MarkPhotoDeleted(s.getCtx(), dst, fname)
+		_, _ = s.photoRepo.MarkPhotoDeleted(s.getCtx(), destPath, fname)
 	}
 
 	return deletedCount, nil
 }
+
 
 func (s *BackupService) CleanAll() error {
 	s.mu.Lock()

@@ -24,10 +24,13 @@ type MoveSummary struct {
 
 // IntegrityResult contains scanning results comparing database records with files on disk
 type IntegrityResult struct {
-	TotalDB       int      `json:"total_db"`
-	TotalDisk     int      `json:"total_disk"`
-	MissingInDisk []string `json:"missing_in_disk"`
-	MatchedCount  int      `json:"matched_count"`
-	IsExactMatch  bool     `json:"is_exact_match"`
-	AlertMessage  string   `json:"alert_message"`
+	TotalDB           int      `json:"total_db"`
+	TotalDisk         int      `json:"total_disk"`
+	MissingInDisk     []string `json:"missing_in_disk"`
+	MatchedCount      int      `json:"matched_count"`
+	IsExactMatch      bool     `json:"is_exact_match"`
+	AlertMessage      string   `json:"alert_message"`
+	DurationMs        int64    `json:"duration_ms"`
+	DurationFormatted string   `json:"duration_formatted"`
 }
+

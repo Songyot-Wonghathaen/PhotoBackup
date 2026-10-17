@@ -112,10 +112,21 @@ func (a *App) ListDBPhotos(destPath string) ([]*modelGen.Photo, error) {
 	return a.backupService.ListDB(destPath)
 }
 
+// ListAllDBPhotos lists ALL photos recorded in database for destination (active, missing, deleted) for Feature 20, 22, 24
+func (a *App) ListAllDBPhotos(destPath string) ([]*modelGen.Photo, error) {
+	return a.backupService.ListAllDB(destPath)
+}
+
 // DeletePhotos deletes files from destination and marks status as 'deleted' in DB (Feature 23 & 25)
 func (a *App) DeletePhotos(targets []string, isAll bool) (int, error) {
 	return a.backupService.Delete(targets, isAll)
 }
+
+// DeletePhotosFromDest deletes files from a specific destination and marks status as 'deleted' in DB (Feature 23 & 25)
+func (a *App) DeletePhotosFromDest(destPath string, targets []string, isAll bool) (int, error) {
+	return a.backupService.DeleteFromDest(destPath, targets, isAll)
+}
+
 
 // GetPhotoThumbnail returns base64 data URL for a single photo
 func (a *App) GetPhotoThumbnail(fullPath string) (string, error) {

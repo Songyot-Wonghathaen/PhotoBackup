@@ -10,6 +10,8 @@ export function CheckIntegrity(arg1:string):Promise<dto.IntegrityResult>;
 
 export function DeletePhotos(arg1:Array<string>,arg2:boolean):Promise<number>;
 
+export function DeletePhotosFromDest(arg1:string,arg2:Array<string>,arg3:boolean):Promise<number>;
+
 export function GetDestPath():Promise<string>;
 
 export function GetPhotoThumbnail(arg1:string):Promise<string>;
@@ -21,6 +23,8 @@ export function GetSourcePath():Promise<string>;
 export function GetTagsWithCount(arg1:string):Promise<Array<repository.TagCount>>;
 
 export function Greet(arg1:string):Promise<string>;
+
+export function ListAllDBPhotos(arg1:string):Promise<Array<model.Photo>>;
 
 export function ListDBPhotos(arg1:string):Promise<Array<model.Photo>>;
 

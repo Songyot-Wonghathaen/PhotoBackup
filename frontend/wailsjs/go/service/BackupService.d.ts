@@ -8,6 +8,8 @@ import {context} from '../models';
 
 export function AnalyzePhoto(arg1:string):Promise<dto.VisionResult>;
 
+export function CancelAnalysis():Promise<void>;
+
 export function CheckIntegrity(arg1:string):Promise<dto.IntegrityResult>;
 
 export function CleanAll():Promise<void>;

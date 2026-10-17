@@ -26,6 +26,24 @@ const aiProgress = ref({ current: 0, total: 0, filename: '' })
 const aiError = ref<string | null>(null)
 const analyzedPhotosList = ref<Array<{ filename: string; description: string; tags: string[]; path?: string }>>([])
 
+// Fallback timer: closes the AI popup if no progress event arrives within 3 minutes
+let aiTimeoutHandle: ReturnType<typeof setTimeout> | null = null
+
+function startAiTimeout() {
+  if (aiTimeoutHandle) clearTimeout(aiTimeoutHandle)
+  aiTimeoutHandle = setTimeout(() => {
+    isAnalyzing.value = false
+    aiTimeoutHandle = null
+  }, 3 * 60 * 1000)
+}
+
+function clearAiTimeout() {
+  if (aiTimeoutHandle) {
+    clearTimeout(aiTimeoutHandle)
+    aiTimeoutHandle = null
+  }
+}
+
 const integrityResult = ref<IntegrityResult | null>(null)
 const lastSummary = ref<MoveSummary>({
   total_files: 0,
@@ -264,6 +282,11 @@ export function useBackup() {
           duration_formatted: summary.duration_formatted || `${summary.duration_ms} ms`,
           has_run: true
         }
+        // Kick the AI progress indicator immediately if files were actually moved
+        if ((summary.moved_files || 0) > 0) {
+          isAnalyzing.value = true
+          aiProgress.value = { current: 0, total: summary.moved_files || 0, filename: '' }
+        }
         aiError.value = null // Clear any previous errors
         await refreshSourceFiles()
         if (typeof (window as any)?.go?.main?.App?.CheckIntegrity === 'function') {
@@ -328,8 +351,12 @@ export function useBackup() {
           duration_formatted: summary.duration_formatted || `${summary.duration_ms} ms`,
           has_run: true
         }
+        // Kick the AI progress indicator immediately if files were actually moved
+        if ((summary.moved_files || 0) > 0) {
+          isAnalyzing.value = true
+          aiProgress.value = { current: 0, total: summary.moved_files || 0, filename: '' }
+        }
         aiError.value = null // Clear any previous errors
-        await refreshSourceFiles()
         if (typeof (window as any)?.go?.main?.App?.CheckIntegrity === 'function') {
           integrityResult.value = await (window as any).go.main.App.CheckIntegrity(destPath.value)
           destCount.value = integrityResult.value?.total_disk || 0
@@ -427,15 +454,33 @@ export function useBackup() {
       }
     }
 
-    // Listen to AI analysis progress events
+    // Listen to AI analysis progress events from the Go background goroutine
     if (typeof (window as any)?.runtime?.EventsOn === 'function') {
       (window as any).runtime.EventsOn('ai_analysis_progress', (data: any) => {
+        clearAiTimeout()
+        isAnalyzing.value = true
         aiProgress.value = {
           current: data.current || 0,
           total: data.total || 0,
           filename: data.filename || ''
         }
-        isAnalyzing.value = data.current < data.total
+        // Keep the tab visible for a moment after the last photo finishes
+        if (data.current >= data.total) {
+          setTimeout(() => { isAnalyzing.value = false }, 1500)
+        } else {
+          // Reset watchdog for each event so we only fire if Go goes silent
+          startAiTimeout()
+        }
+      })
+
+      // Listen for per-file AI errors emitted by the Go background goroutine
+      ;(window as any).runtime.EventsOn('ai_analysis_error', (data: any) => {
+        const filename = data?.filename || 'ไฟล์ไม่ทราบชื่อ'
+        const errMsg = data?.error || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ'
+        aiError.value = `วิเคราะห์ภาพ "${filename}" ไม่สำเร็จ: ${errMsg}`
+        // Close the popup immediately on first error
+        clearAiTimeout()
+        isAnalyzing.value = false
       })
     }
   }

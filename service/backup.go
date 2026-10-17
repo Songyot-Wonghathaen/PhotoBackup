@@ -50,13 +50,25 @@ type MoveSummary = dto.MoveSummary
 type IntegrityResult = dto.IntegrityResult
 
 type BackupService struct {
-	ctx       context.Context
-	photoRepo repository.PhotoRepository
-	tagRepo   repository.TagRepository
-	aiVision  AiVisionService
-	source    string
-	dest      string
-	mu        sync.RWMutex
+	ctx            context.Context
+	photoRepo      repository.PhotoRepository
+	tagRepo        repository.TagRepository
+	aiVision       AiVisionService
+	source         string
+	dest           string
+	mu             sync.RWMutex
+	analyzeCancel  context.CancelFunc
+}
+
+// CancelAnalysis stops any running background AI analysis immediately.
+// Called from frontend via Wails IPC when the user dismisses the AI popup.
+func (s *BackupService) CancelAnalysis() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.analyzeCancel != nil {
+		s.analyzeCancel()
+		s.analyzeCancel = nil
+	}
 }
 
 func NewBackupService(photoRepo repository.PhotoRepository, optionalServices ...interface{}) *BackupService {
@@ -475,79 +487,109 @@ func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) 
 	if len(movedPhotos) > 0 {
 		_ = s.photoRepo.AddPhotosInBatch(s.getCtx(), movedPhotos)
 
-		// Part C (Features 12, 13, 14): AI Vision Analysis on Backup
+		// Part C (Features 12, 13, 14): AI Vision Analysis runs in background
+		// so Move returns immediately after files are copied and DB records inserted.
 		s.mu.RLock()
 		ai := s.aiVision
 		tagRepo := s.tagRepo
 		s.mu.RUnlock()
 
-	if ai != nil && ai.IsAvailable() {
-			for idx, p := range movedPhotos {
-				if !isImageFile(p.FileName) {
-					continue
-				}
-				fullDst := filepath.Join(dst, p.FileName)
-				visionRes, err := ai.AnalyzePhoto(s.getCtx(), fullDst)
-				if err != nil {
-					// Feature 14: Handle failure gracefully, leave description blank and continue
-					continue
-				}
-
-				// Feature 13: Save Description and Tags to DB
-				if visionRes != nil {
-					if visionRes.Description != "" {
-						// Use filename+dest query (p.ID is 0 after CreateInBatches)
-						dbErr := s.photoRepo.UpdatePhotoDescriptionByFile(s.getCtx(), dst, p.FileName, visionRes.Description)
-						if dbErr != nil {
-							log.Printf("[AI-Vision] ⚠️ บันทึก description ล้มเหลวสำหรับ %s: %v", p.FileName, dbErr)
-						} else {
-							log.Printf("[AI-Vision] 💾 บันทึก description ลง DB สำเร็จ: %s", p.FileName)
-						}
-					}
-
-					if tagRepo != nil && len(visionRes.Tags) > 0 {
-						// Fetch the real DB record to get actual ID for photo_tags
-						dbPhotos, qErr := s.photoRepo.GetActivePhotosByDest(s.getCtx(), dst)
-						var realID int32
-						if qErr == nil {
-							for _, dbP := range dbPhotos {
-								if strings.EqualFold(dbP.FileName, p.FileName) {
-									realID = dbP.ID
-									break
-								}
-							}
-						}
-						if realID > 0 {
-							createdTags, tagErr := tagRepo.FindOrCreateTags(s.getCtx(), visionRes.Tags)
-							if tagErr == nil && len(createdTags) > 0 {
-								_ = tagRepo.AddPhotoTags(s.getCtx(), realID, createdTags, "ai")
-								log.Printf("[AI-Vision] 🏷️ บันทึก %d tags ลง DB สำเร็จ: %s", len(createdTags), p.FileName)
-							}
-						} else {
-							log.Printf("[AI-Vision] ⚠️ ไม่พบ ID ใน DB สำหรับ %s — ข้าม tag insert", p.FileName)
-						}
-					}
-				}
-
-	// Emit progress event to Frontend
-				if s.ctx != nil {
-					runtime.EventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
-						"current":  idx + 1,
-						"total":    len(movedPhotos),
-						"filename": p.FileName,
-					})
-				}
-
-				// Polite pause to stay smoothly within the free tier rate limit
-				// 2 seconds = ~30 requests/minute, safely under 15 req/min free tier limit
-				if idx < len(movedPhotos)-1 {
-					time.Sleep(2 * time.Second)
-				}
-			}
+		if ai != nil && ai.IsAvailable() {
+			analyzeCtx, cancel := context.WithCancel(s.getCtx())
+			s.mu.Lock()
+			s.analyzeCancel = cancel
+			s.mu.Unlock()
+			go s.analyzeMovedPhotos(analyzeCtx, dst, movedPhotos, ai, tagRepo)
 		}
 	}
 
 	return summary, nil
+}
+
+// analyzeMovedPhotos runs AI vision analysis in the background after Move returns.
+func (s *BackupService) analyzeMovedPhotos(ctx context.Context, dst string, photos []*modelGen.Photo, ai AiVisionService, tagRepo repository.TagRepository) {
+	defer func() {
+		s.mu.Lock()
+		s.analyzeCancel = nil
+		s.mu.Unlock()
+	}()
+
+	// Build a filename→ID map with one query instead of querying per file.
+	dbPhotos, qErr := s.photoRepo.GetActivePhotosByDest(ctx, dst)
+	idMap := make(map[string]int32, len(photos))
+	if qErr == nil {
+		for _, dbP := range dbPhotos {
+			idMap[strings.ToLower(dbP.FileName)] = dbP.ID
+		}
+	}
+
+	for idx, p := range photos {
+		// Stop immediately if the context was cancelled (e.g. frontend called CancelAnalysis)
+		select {
+		case <-ctx.Done():
+			log.Printf("[AI-Vision] ℹ️ การวิเคราะห์ถูกยกเลิก")
+			return
+		default:
+		}
+
+		if !isImageFile(p.FileName) {
+			continue
+		}
+		fullDst := filepath.Join(dst, p.FileName)
+		visionRes, err := ai.AnalyzePhoto(ctx, fullDst)
+		if err != nil {
+			// Feature 14: Handle failure gracefully, leave description blank and stop
+			log.Printf("[AI-Vision] ⚠️ วิเคราะห์ล้มเหลวสำหรับ %s: %v", p.FileName, err)
+			if s.ctx != nil {
+				runtime.EventsEmit(s.ctx, "ai_analysis_error", map[string]interface{}{
+					"filename": p.FileName,
+					"error":    err.Error(),
+				})
+			}
+			return
+		}
+
+		if visionRes == nil {
+			continue
+		}
+
+		// Feature 13: Save Description and Tags to DB
+		if visionRes.Description != "" {
+			dbErr := s.photoRepo.UpdatePhotoDescriptionByFile(ctx, dst, p.FileName, visionRes.Description)
+			if dbErr != nil {
+				log.Printf("[AI-Vision] ⚠️ บันทึก description ล้มเหลวสำหรับ %s: %v", p.FileName, dbErr)
+			} else {
+				log.Printf("[AI-Vision] 💾 บันทึก description ลง DB สำเร็จ: %s", p.FileName)
+			}
+		}
+
+		if tagRepo != nil && len(visionRes.Tags) > 0 {
+			realID := idMap[strings.ToLower(p.FileName)]
+			if realID > 0 {
+				createdTags, tagErr := tagRepo.FindOrCreateTags(ctx, visionRes.Tags)
+				if tagErr == nil && len(createdTags) > 0 {
+					_ = tagRepo.AddPhotoTags(ctx, realID, createdTags, "ai")
+					log.Printf("[AI-Vision] 🏷️ บันทึก %d tags ลง DB สำเร็จ: %s", len(createdTags), p.FileName)
+				}
+			} else {
+				log.Printf("[AI-Vision] ⚠️ ไม่พบ ID ใน DB สำหรับ %s — ข้าม tag insert", p.FileName)
+			}
+		}
+
+		// Emit progress event to Frontend
+		if s.ctx != nil {
+			runtime.EventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
+				"current":  idx + 1,
+				"total":    len(photos),
+				"filename": p.FileName,
+			})
+		}
+
+		// Polite pause to stay within free tier rate limit (~15 req/min)
+		if idx < len(photos)-1 {
+			time.Sleep(2 * time.Second)
+		}
+	}
 }
 
 // streamCopyAndRemoveFile implements Feature 6:

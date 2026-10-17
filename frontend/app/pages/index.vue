@@ -1,5 +1,6 @@
 <template>
   <div class="backup-view">
+    <div class="backup-scroll-area">
     <!-- Header -->
     <header class="view-header">
       <div class="header-text">
@@ -271,6 +272,8 @@
         </button>
       </div>
     </section>
+
+    </div><!-- end .backup-scroll-area -->
 
     <!-- Bottom Status Bar (ผลการสำรองล่าสุด) -->
     <footer class="bottom-status-bar" v-if="lastSummary.has_run">
@@ -650,6 +653,10 @@ function handleMoveAll() {
 
 function handleCancelAnalysis() {
   if (confirm('คุณต้องการยกเลิกการวิเคราะห์ภาพด้วย AI หรือไม่?')) {
+    // Tell Go to stop the background goroutine
+    if (typeof (window as any)?.go?.main?.App?.CancelAnalysis === 'function') {
+      (window as any).go.main.App.CancelAnalysis()
+    }
     isAnalyzing.value = false
     aiProgress.value = { current: 0, total: 0, filename: '' }
   }
@@ -696,12 +703,19 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 24px 28px 16px 28px;
+  padding: 0;
   box-sizing: border-box;
   background-color: #F4F5FA;
-  overflow-y: auto;
+  overflow: hidden;
   user-select: none;
   font-family: 'Prompt', 'Inter', sans-serif;
+}
+
+.backup-scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px 16px 28px;
+  box-sizing: border-box;
 }
 
 /* Header */
@@ -1228,6 +1242,7 @@ onMounted(() => {
   justify-content: space-between;
   box-shadow: 0 1px 3px rgba(0,0,0,0.02);
   flex-shrink: 0;
+  margin: 0 28px 16px 28px;
 }
 
 .status-left {

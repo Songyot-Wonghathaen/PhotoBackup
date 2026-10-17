@@ -2,7 +2,7 @@ package repository
 
 import (
 	"context"
-	"net/url"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -82,10 +82,9 @@ func dedupeIDs(ids []int32) []int32 {
 	return result
 }
 
-// thumbnailURL builds the path-based thumbnail endpoint URL served by the
-// asset handler in main.go (/api/thumbnail?path=<full path>).
-func thumbnailURL(fullPath string) string {
-	return "/api/thumbnail?path=" + url.QueryEscape(fullPath)
+// thumbnailURL builds the ID-based thumbnail endpoint URL served by server.ImageHandler (/thumb/{id}).
+func thumbnailURL(photoID int32) string {
+	return fmt.Sprintf("/thumb/%d", photoID)
 }
 
 func photoTagNames(photo *model.Photo) []string {
@@ -108,7 +107,7 @@ func toPhotoListItem(photo *model.Photo) dto.PhotoListItem {
 		ID:          photo.ID,
 		FileName:    photo.FileName,
 		FullPath:    fullPath,
-		ThumbURL:    thumbnailURL(fullPath),
+		ThumbURL:    thumbnailURL(photo.ID),
 		Description: photo.Description,
 		Tags:        photoTagNames(photo),
 		BackedUpAt:  photo.BackedUpAt.Format("2006-01-02 15:04:05"),
@@ -306,7 +305,7 @@ func (r *galleryRepository) toPhotoDetail(ctx context.Context, photo *model.Phot
 		FileName:        photo.FileName,
 		DestinationPath: photo.DestinationPath,
 		FullPath:        fullPath,
-		ThumbURL:        thumbnailURL(fullPath),
+		ThumbURL:        thumbnailURL(photo.ID),
 		Description:     photo.Description,
 		Tags:            tagItems,
 		SizeBytes:       photo.SizeBytes,

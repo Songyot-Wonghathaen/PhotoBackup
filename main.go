@@ -3,6 +3,7 @@ package main
 import (
 	"PhotoVault/controller"
 	"PhotoVault/repository"
+	"PhotoVault/server"
 	"PhotoVault/service"
 	"PhotoVault/utils"
 
@@ -80,7 +81,7 @@ func main() {
 		Height: 768,
 		AssetServer: &assetserver.Options{
 			Assets:  assets,
-			Handler: createThumbnailHandler(),
+			Handler: server.NewHandler(db, createThumbnailHandler()),
 		},
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup:        app.startup,

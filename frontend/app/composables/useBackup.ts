@@ -467,6 +467,7 @@ export function useBackup() {
         // Keep the tab visible for a moment after the last photo finishes
         if (data.current >= data.total) {
           setTimeout(() => { isAnalyzing.value = false }, 1500)
+          fetchDbPhotos()
         } else {
           // Reset watchdog for each event so we only fire if Go goes silent
           startAiTimeout()

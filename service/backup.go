@@ -67,8 +67,14 @@ func (s *BackupService) CancelAnalysis() {
 	defer s.mu.Unlock()
 	if s.analyzeCancel != nil {
 		s.analyzeCancel()
-		s.analyzeCancel = nil
 	}
+}
+
+func safeEmit(ctx context.Context, eventName string, optionalData ...interface{}) {
+	if ctx == nil || ctx.Value("events") == nil {
+		return
+	}
+	runtime.EventsEmit(ctx, eventName, optionalData...)
 }
 
 func NewBackupService(photoRepo repository.PhotoRepository, optionalServices ...interface{}) *BackupService {
@@ -507,6 +513,7 @@ func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) 
 }
 
 // analyzeMovedPhotos runs AI vision analysis in the background after Move returns.
+// Uses batch requests to analyze multiple photos per Gemini call for higher throughput.
 func (s *BackupService) analyzeMovedPhotos(ctx context.Context, dst string, photos []*modelGen.Photo, ai AiVisionService, tagRepo repository.TagRepository) {
 	defer func() {
 		s.mu.Lock()
@@ -523,8 +530,19 @@ func (s *BackupService) analyzeMovedPhotos(ctx context.Context, dst string, phot
 		}
 	}
 
-	for idx, p := range photos {
-		// Stop immediately if the context was cancelled (e.g. frontend called CancelAnalysis)
+	// Filter to image files only, keeping order
+	var imgPhotos []*modelGen.Photo
+	for _, p := range photos {
+		if isImageFile(p.FileName) {
+			imgPhotos = append(imgPhotos, p)
+		}
+	}
+	if len(imgPhotos) == 0 {
+		return
+	}
+
+	// Process in chunks of analyzeBatchSize
+	for i := 0; i < len(imgPhotos); i += analyzeBatchSize {
 		select {
 		case <-ctx.Done():
 			log.Printf("[AI-Vision] ℹ️ การวิเคราะห์ถูกยกเลิก")
@@ -532,62 +550,72 @@ func (s *BackupService) analyzeMovedPhotos(ctx context.Context, dst string, phot
 		default:
 		}
 
-		if !isImageFile(p.FileName) {
-			continue
+		end := i + analyzeBatchSize
+		if end > len(imgPhotos) {
+			end = len(imgPhotos)
 		}
-		fullDst := filepath.Join(dst, p.FileName)
-		visionRes, err := ai.AnalyzePhoto(ctx, fullDst)
+		batch := imgPhotos[i:end]
+		batchPaths := make([]string, len(batch))
+		for j, p := range batch {
+			batchPaths[j] = filepath.Join(dst, p.FileName)
+		}
+
+		// Send the whole batch in one request
+		results, err := ai.AnalyzePhotosBatch(ctx, batchPaths)
 		if err != nil {
-			// Feature 14: Handle failure gracefully, leave description blank and stop
-			log.Printf("[AI-Vision] ⚠️ วิเคราะห์ล้มเหลวสำหรับ %s: %v", p.FileName, err)
-			if s.ctx != nil {
-				runtime.EventsEmit(s.ctx, "ai_analysis_error", map[string]interface{}{
-					"filename": p.FileName,
-					"error":    err.Error(),
-				})
-			}
+			// Feature 14: Handle failure gracefully — batch failed entirely
+			log.Printf("[AI-Vision] ⚠️ batch วิเคราะห์ล้มเหลว: %v", err)
+			safeEmit(s.ctx, "ai_analysis_error", map[string]interface{}{
+				"filename": fmt.Sprintf("%d รูป (batch)", len(batch)),
+				"error":    err.Error(),
+			})
 			return
 		}
 
-		if visionRes == nil {
-			continue
-		}
-
-		// Feature 13: Save Description and Tags to DB
-		if visionRes.Description != "" {
-			dbErr := s.photoRepo.UpdatePhotoDescriptionByFile(ctx, dst, p.FileName, visionRes.Description)
-			if dbErr != nil {
-				log.Printf("[AI-Vision] ⚠️ บันทึก description ล้มเหลวสำหรับ %s: %v", p.FileName, dbErr)
-			} else {
-				log.Printf("[AI-Vision] 💾 บันทึก description ลง DB สำเร็จ: %s", p.FileName)
+		// Save results per photo in the batch
+		for j, res := range results {
+			if res == nil {
+				continue
 			}
-		}
+			p := batch[j]
 
-		if tagRepo != nil && len(visionRes.Tags) > 0 {
-			realID := idMap[strings.ToLower(p.FileName)]
-			if realID > 0 {
-				createdTags, tagErr := tagRepo.FindOrCreateTags(ctx, visionRes.Tags)
-				if tagErr == nil && len(createdTags) > 0 {
-					_ = tagRepo.AddPhotoTags(ctx, realID, createdTags, "ai")
-					log.Printf("[AI-Vision] 🏷️ บันทึก %d tags ลง DB สำเร็จ: %s", len(createdTags), p.FileName)
+			// Feature 13: Save Description
+			if res.Description != "" {
+				dbErr := s.photoRepo.UpdatePhotoDescriptionByFile(ctx, dst, p.FileName, res.Description)
+				if dbErr != nil {
+					log.Printf("[AI-Vision] ⚠️ บันทึก description ล้มเหลวสำหรับ %s: %v", p.FileName, dbErr)
+				} else {
+					log.Printf("[AI-Vision] 💾 บันทึก description ลง DB สำเร็จ: %s", p.FileName)
 				}
-			} else {
-				log.Printf("[AI-Vision] ⚠️ ไม่พบ ID ใน DB สำหรับ %s — ข้าม tag insert", p.FileName)
+			}
+
+			// Feature 13: Save Tags
+			if tagRepo != nil && len(res.Tags) > 0 {
+				realID := idMap[strings.ToLower(p.FileName)]
+				if realID > 0 {
+					createdTags, tagErr := tagRepo.FindOrCreateTags(ctx, res.Tags)
+					if tagErr == nil && len(createdTags) > 0 {
+						_ = tagRepo.AddPhotoTags(ctx, realID, createdTags, "ai")
+						log.Printf("[AI-Vision] 🏷️ บันทึก %d tags ลง DB สำเร็จ: %s", len(createdTags), p.FileName)
+					}
+				} else {
+					log.Printf("[AI-Vision] ⚠️ ไม่พบ ID ใน DB สำหรับ %s — ข้าม tag insert", p.FileName)
+				}
 			}
 		}
 
-		// Emit progress event to Frontend
-		if s.ctx != nil {
-			runtime.EventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
-				"current":  idx + 1,
-				"total":    len(photos),
-				"filename": p.FileName,
-			})
-		}
+		// Emit progress event to Frontend after each batch
+		completed := end
+		lastName := batch[len(batch)-1].FileName
+		safeEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
+			"current":  completed,
+			"total":    len(imgPhotos),
+			"filename": lastName,
+		})
 
-		// Polite pause to stay within free tier rate limit (~15 req/min)
-		if idx < len(photos)-1 {
-			time.Sleep(2 * time.Second)
+		// Polite pause between batches to stay within free tier rate limit (~15 req/min)
+		if end < len(imgPhotos) {
+			time.Sleep(4 * time.Second)
 		}
 	}
 }

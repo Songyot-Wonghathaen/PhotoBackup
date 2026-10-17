@@ -242,6 +242,12 @@ async function loadDetail() {
 
 // Other photos for the thumbnails strip
 async function loadStrip() {
+  if (!destPath.value && typeof (window as any)?.go?.main?.App?.GetDestPath === 'function') {
+    try {
+      const dst = await (window as any).go.main.App.GetDestPath()
+      if (dst) destPath.value = dst
+    } catch (_) {}
+  }
   if (!destPath.value) return
   const result = await photoApi.searchPhotos(destPath.value, { query: '', tag_ids: [], page: 1, page_size: 8 })
   if (result) strip.value = result.items || []

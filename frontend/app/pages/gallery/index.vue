@@ -293,7 +293,7 @@ async function search(newPage: number, append: boolean) {
   }
   const result = await photoApi.searchPhotos(destPath.value, params)
   // Safety: ensure loading is cleared even if race condition occurs
-  clearLoading()
+  photoApi.clearLoading()
   if (seq !== searchSeq) return // stale response: thrown away
   if (!result) {
     if (!append) cards.value = []
@@ -335,7 +335,7 @@ async function resolveSelectedTag(name: string): Promise<void> {
   // SuggestTags queries the existing tags table, including tags whose photos
   // are no longer active, so the empty state can remain accurate.
   const matches = await photoApi.suggestTags(name, 50)
-  clearLoading()
+  photoApi.clearLoading()
   const exact = matches?.find((tag) => tag.name === name)
   selectedTagId.value = exact?.id ?? null
   selectedTagExists.value = Boolean(exact)
@@ -381,6 +381,14 @@ onMounted(async () => {
     selectedTag.value = route.query.tag
   }
 
+  // Ensure destPath is populated from backend if not already set in memory
+  if (!destPath.value && typeof (window as any)?.go?.main?.App?.GetDestPath === 'function') {
+    try {
+      const dst = await (window as any).go.main.App.GetDestPath()
+      if (dst) destPath.value = dst
+    } catch (_) {}
+  }
+
   await loadCloud()
   if (selectedTag.value && tagCloudList.value.length > 0) {
     const found = tagCloudList.value.find((t) => t.name === selectedTag.value)
@@ -393,6 +401,16 @@ onMounted(async () => {
   }
   if (selectedTag.value) await resolveSelectedTag(selectedTag.value)
   await search(1, false)
+
+  // Listen for AI analysis completion/progress so new photos, tags, and descriptions appear automatically
+  if (typeof (window as any)?.runtime?.EventsOn === 'function') {
+    (window as any).runtime.EventsOn('ai_analysis_progress', async (data: any) => {
+      if (data && (data.current >= data.total || data.current % 5 === 0)) {
+        await loadCloud()
+        await search(1, false)
+      }
+    })
+  }
 })
 
 watch(destPath, async () => {

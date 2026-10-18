@@ -30,7 +30,8 @@ type geminiResponse struct {
 	Candidates []struct {
 		Content struct {
 			Parts []struct {
-				Text string `json:"text"`
+				Text    string `json:"text"`
+				Thought bool   `json:"thought,omitempty"`
 			} `json:"parts"`
 		} `json:"content"`
 	} `json:"candidates"`

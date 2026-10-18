@@ -26,6 +26,7 @@ type PhotoRepository interface {
 	MarkAllPhotosDeleted(ctx context.Context, dest string) (int64, error)
 	UpdatePhotoDescription(ctx context.Context, id int32, description string) error
 	UpdatePhotoDescriptionByFile(ctx context.Context, dest string, filename string, description string) error
+	UpdatePhotoDescriptionsInBatch(ctx context.Context, updates map[int32]string) error
 	CleanPhotos(ctx context.Context) error
 	SearchPhotosByDescription(ctx context.Context, dest string, query string, limit int, offset int) ([]*model.Photo, error)
 	SearchPhotosByTag(ctx context.Context, dest string, tagName string, limit int, offset int) ([]*model.Photo, error)
@@ -215,6 +216,26 @@ func (r *photoRepository) UpdatePhotoDescriptionByFile(ctx context.Context, dest
 		Where(p.FileName.Eq(filename)).
 		Update(p.Description, description)
 	return err
+}
+
+// UpdatePhotoDescriptionsInBatch updates multiple photo descriptions inside a single SQLite transaction
+func (r *photoRepository) UpdatePhotoDescriptionsInBatch(ctx context.Context, updates map[int32]string) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		qTx := query.Use(tx)
+		p := qTx.Photo
+		for id, desc := range updates {
+			if id <= 0 || desc == "" {
+				continue
+			}
+			if _, err := p.WithContext(ctx).Where(p.ID.Eq(id)).Update(p.Description, desc); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // CleanPhotos truncates/cleans the photos table

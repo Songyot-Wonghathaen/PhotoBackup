@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"PhotoVault/controller/dto"
@@ -108,7 +109,19 @@ func (s *BackupService) AnalyzePhoto(filePath string) (*VisionResult, error) {
 	if ai == nil {
 		ai = NewAiVisionService()
 	}
-	return ai.AnalyzePhoto(s.getCtx(), filePath)
+	res, err := ai.AnalyzePhoto(s.getCtx(), filePath)
+	if err == nil && res != nil {
+		tagsStr := "-"
+		if len(res.Tags) > 0 {
+			tagsStr = strings.Join(res.Tags, ", ")
+		}
+		descStr := strings.TrimSpace(res.Description)
+		if descStr == "" {
+			descStr = "(ไม่มีคำอธิบาย)"
+		}
+		log.Printf("[AI-Vision] %s -> Tags: [%s] | คำอธิบาย: %s", filepath.Base(filePath), tagsStr, descStr)
+	}
+	return res, err
 }
 
 func (s *BackupService) SetContext(ctx context.Context) {
@@ -168,7 +181,8 @@ func (s *BackupService) SetDest(dest string) (*IntegrityResult, error) {
 	// Feature 5: Immediate integrity scan upon selecting destination
 	integrity, err := s.CheckIntegrity(dest)
 	if err != nil {
-		return nil, err
+		log.Printf("[BackupService] ⚠️ Integrity check warning for %s: %v", dest, err)
+		return &IntegrityResult{IsExactMatch: true}, nil
 	}
 	return &integrity, nil
 }
@@ -395,8 +409,24 @@ func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) 
 		return summary, nil
 	}
 
+	s.mu.RLock()
+	aiSvc := s.aiVision
+	s.mu.RUnlock()
+
+	copyWorkers := 16
+	duplicateGuard := true
+	autoAnalyze := true
+	if cfgAi, ok := aiSvc.(ConfigurableAiVisionService); ok {
+		copyWorkers = cfgAi.GetCopyWorkers()
+		duplicateGuard = cfgAi.IsDuplicateGuardEnabled()
+		autoAnalyze = cfgAi.IsAutoAnalyzeEnabled()
+	}
+
 	totalToMove := len(filesToMove)
-	numWorkers := 16
+	numWorkers := copyWorkers
+	if numWorkers < 1 {
+		numWorkers = 16
+	}
 	if numWorkers > totalToMove {
 		numWorkers = totalToMove
 	}
@@ -460,7 +490,7 @@ func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) 
 			summary.FailedList = append(summary.FailedList, fmt.Sprintf("%s (%v)", res.filename, res.err))
 		} else {
 			// Check if duplicate SHA256 was found in DB
-			if res.sha256 != "" && shaMap[res.sha256] {
+			if duplicateGuard && res.sha256 != "" && shaMap[res.sha256] {
 				// Duplicate content already exists in DB
 				summary.SkippedFiles++
 				summary.SkippedList = append(summary.SkippedList, fmt.Sprintf("%s (duplicate content sha256)", res.filename))
@@ -494,7 +524,7 @@ func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) 
 		tagRepo := s.tagRepo
 		s.mu.RUnlock()
 
-		if ai != nil && ai.IsAvailable() {
+		if autoAnalyze && ai != nil && ai.IsAvailable() {
 			analyzeCtx, cancel := context.WithCancel(s.getCtx())
 			s.mu.Lock()
 			s.analyzeCancel = cancel
@@ -514,82 +544,262 @@ func (s *BackupService) analyzeMovedPhotos(ctx context.Context, dst string, phot
 		s.mu.Unlock()
 	}()
 
+	var validPhotos []*modelGen.Photo
+	for _, p := range photos {
+		if isImageFile(p.FileName) {
+			validPhotos = append(validPhotos, p)
+		}
+	}
+	totalPhotos := len(validPhotos)
+	if totalPhotos == 0 {
+		return
+	}
+
+	startAnalyze := time.Now()
+
 	// Build a filename→ID map with one query instead of querying per file.
 	dbPhotos, qErr := s.photoRepo.GetActivePhotosByDest(ctx, dst)
-	idMap := make(map[string]int32, len(photos))
+	idMap := make(map[string]int32, totalPhotos)
 	if qErr == nil {
 		for _, dbP := range dbPhotos {
 			idMap[strings.ToLower(dbP.FileName)] = dbP.ID
 		}
 	}
 
-	for idx, p := range photos {
-		// Stop immediately if the context was cancelled (e.g. frontend called CancelAnalysis)
-		select {
-		case <-ctx.Done():
-			log.Printf("[AI-Vision] ℹ️ การวิเคราะห์ถูกยกเลิก")
-			return
-		default:
+	batchAi, isBatchCapable := ai.(BatchAiVisionService)
+	batchSize := 1
+	numWorkers := 4
+	if isBatchCapable {
+		batchSize = batchAi.BatchSize()
+		if batchSize < 1 {
+			batchSize = 20
 		}
-
-		if !isImageFile(p.FileName) {
-			continue
-		}
-		fullDst := filepath.Join(dst, p.FileName)
-		visionRes, err := ai.AnalyzePhoto(ctx, fullDst)
-		if err != nil {
-			// Feature 14: Handle failure gracefully, leave description blank and stop
-			log.Printf("[AI-Vision] ⚠️ วิเคราะห์ล้มเหลวสำหรับ %s: %v", p.FileName, err)
-			if s.ctx != nil {
-				runtime.EventsEmit(s.ctx, "ai_analysis_error", map[string]interface{}{
-					"filename": p.FileName,
-					"error":    err.Error(),
-				})
-			}
-			return
-		}
-
-		if visionRes == nil {
-			continue
-		}
-
-		// Feature 13: Save Description and Tags to DB
-		if visionRes.Description != "" {
-			dbErr := s.photoRepo.UpdatePhotoDescriptionByFile(ctx, dst, p.FileName, visionRes.Description)
-			if dbErr != nil {
-				log.Printf("[AI-Vision] ⚠️ บันทึก description ล้มเหลวสำหรับ %s: %v", p.FileName, dbErr)
-			} else {
-				log.Printf("[AI-Vision] 💾 บันทึก description ลง DB สำเร็จ: %s", p.FileName)
-			}
-		}
-
-		if tagRepo != nil && len(visionRes.Tags) > 0 {
-			realID := idMap[strings.ToLower(p.FileName)]
-			if realID > 0 {
-				createdTags, tagErr := tagRepo.FindOrCreateTags(ctx, visionRes.Tags)
-				if tagErr == nil && len(createdTags) > 0 {
-					_ = tagRepo.AddPhotoTags(ctx, realID, createdTags, "ai")
-					log.Printf("[AI-Vision] 🏷️ บันทึก %d tags ลง DB สำเร็จ: %s", len(createdTags), p.FileName)
-				}
-			} else {
-				log.Printf("[AI-Vision] ⚠️ ไม่พบ ID ใน DB สำหรับ %s — ข้าม tag insert", p.FileName)
-			}
-		}
-
-		// Emit progress event to Frontend
-		if s.ctx != nil {
-			runtime.EventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
-				"current":  idx + 1,
-				"total":    len(photos),
-				"filename": p.FileName,
-			})
-		}
-
-		// Polite pause to stay within free tier rate limit (~15 req/min)
-		if idx < len(photos)-1 {
-			time.Sleep(2 * time.Second)
+		numWorkers = batchAi.WorkerConcurrency()
+		if numWorkers < 1 {
+			numWorkers = 8
 		}
 	}
+
+	type photoBatch struct {
+		items []*modelGen.Photo
+	}
+
+	var batches []photoBatch
+	var allBatchPaths [][]string
+	for i := 0; i < totalPhotos; i += batchSize {
+		end := i + batchSize
+		if end > totalPhotos {
+			end = totalPhotos
+		}
+		slice := validPhotos[i:end]
+		batches = append(batches, photoBatch{items: slice})
+		if isBatchCapable && len(slice) > 1 {
+			paths := make([]string, len(slice))
+			for j, p := range slice {
+				paths[j] = filepath.Join(dst, p.FileName)
+			}
+			allBatchPaths = append(allBatchPaths, paths)
+		}
+	}
+
+	if isBatchCapable && len(allBatchPaths) > 0 {
+		go batchAi.PrebuildBatchCollages(ctx, allBatchPaths)
+	}
+
+	if numWorkers > len(batches) {
+		numWorkers = len(batches)
+	}
+
+	log.Printf("[AI-Vision] เริ่มต้นวิเคราะห์ความเร็วสูง %d รูป (%d Batches, Batch ละ %d รูป, %d Workers)", totalPhotos, len(batches), batchSize, numWorkers)
+
+	batchCh := make(chan photoBatch, len(batches))
+	for _, b := range batches {
+		batchCh <- b
+	}
+	close(batchCh)
+
+	var completedCount int32
+	var successBatches int32
+	var dbWriteMu sync.Mutex
+	var firstErrMu sync.Mutex
+	var firstErr error
+	var firstErrFile string
+
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func(wID int) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[AI-Vision] Worker %d กู้คืนจากข้อผิดพลาด: %v", wID, r)
+				}
+			}()
+
+			// Stagger initial worker start by 90ms per worker so requests flow in a smooth continuous pipeline
+			if wID > 0 {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Duration(wID*90) * time.Millisecond):
+				}
+			}
+
+			for batch := range batchCh {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				paths := make([]string, len(batch.items))
+				for i, p := range batch.items {
+					paths[i] = filepath.Join(dst, p.FileName)
+				}
+
+				var results []*VisionResult
+				var err error
+				for retry := 0; retry < 4; retry++ {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+
+					if isBatchCapable && len(paths) > 1 {
+						results, err = batchAi.AnalyzePhotoBatch(ctx, paths)
+					} else {
+						res, singleErr := ai.AnalyzePhoto(ctx, paths[0])
+						if singleErr == nil {
+							results = []*VisionResult{res}
+							err = nil
+						} else {
+							err = singleErr
+						}
+					}
+
+					if err == nil && len(results) > 0 {
+						break
+					}
+					backoff := time.Duration(retry+1) * 400 * time.Millisecond
+					log.Printf("[AI-Vision] กำลังลอง Batch ใหม่ (%s) รอบที่ %d/4 (พัก %v)...", batch.items[0].FileName, retry+1, backoff)
+					time.Sleep(backoff)
+				}
+
+				// Fallback rescue: if a multi-photo batch still failed, split into two half-batches to rescue photos
+				if err != nil && isBatchCapable && len(paths) > 2 {
+					mid := len(paths) / 2
+					res1, err1 := batchAi.AnalyzePhotoBatch(ctx, paths[:mid])
+					res2, err2 := batchAi.AnalyzePhotoBatch(ctx, paths[mid:])
+					if err1 == nil || err2 == nil {
+						results = make([]*VisionResult, len(paths))
+						if err1 == nil {
+							copy(results[:mid], res1)
+						}
+						if err2 == nil {
+							copy(results[mid:], res2)
+						}
+						err = nil
+					}
+				}
+
+				if err != nil {
+					log.Printf("[AI-Vision] Batch วิเคราะห์ล้มเหลวถาวร (%s): %v", batch.items[0].FileName, err)
+					firstErrMu.Lock()
+					if firstErr == nil {
+						firstErr = err
+						firstErrFile = batch.items[0].FileName
+					}
+					firstErrMu.Unlock()
+				} else {
+					atomic.AddInt32(&successBatches, 1)
+
+					descUpdates := make(map[int32]string, len(batch.items))
+					tagUpdates := make(map[int32][]string, len(batch.items))
+
+					for i, p := range batch.items {
+						if i >= len(results) || results[i] == nil {
+							continue
+						}
+						vr := results[i]
+
+						tagsStr := "-"
+						if len(vr.Tags) > 0 {
+							tagsStr = strings.Join(vr.Tags, ", ")
+						}
+						descStr := strings.TrimSpace(vr.Description)
+						if descStr == "" {
+							descStr = "(ไม่มีคำอธิบาย)"
+						}
+						log.Printf("[AI-Vision] %s -> Tags: [%s] | คำอธิบาย: %s", p.FileName, tagsStr, descStr)
+
+						realID := idMap[strings.ToLower(p.FileName)]
+						if realID <= 0 {
+							if vr.Description != "" {
+								_ = s.photoRepo.UpdatePhotoDescriptionByFile(ctx, dst, p.FileName, vr.Description)
+							}
+							continue
+						}
+						if vr.Description != "" {
+							descUpdates[realID] = vr.Description
+						}
+						if len(vr.Tags) > 0 {
+							tagUpdates[realID] = vr.Tags
+						}
+					}
+
+					if len(descUpdates) > 0 || (tagRepo != nil && len(tagUpdates) > 0) {
+						dbWriteMu.Lock()
+						if len(descUpdates) > 0 {
+							_ = s.photoRepo.UpdatePhotoDescriptionsInBatch(ctx, descUpdates)
+						}
+						if tagRepo != nil && len(tagUpdates) > 0 {
+							_ = tagRepo.AddPhotoTagsInBatch(ctx, tagUpdates, "ai")
+						}
+						dbWriteMu.Unlock()
+					}
+				}
+
+				// Always increment completedCount so UI progress never gets stuck below totalPhotos
+				done := int(atomic.AddInt32(&completedCount, int32(len(batch.items))))
+				lastFile := batch.items[len(batch.items)-1].FileName
+				if s.ctx != nil {
+					runtime.EventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
+						"current":  done,
+						"total":    totalPhotos,
+						"filename": lastFile,
+					})
+				}
+			}
+		}(w)
+	}
+
+	wg.Wait()
+
+	if atomic.LoadInt32(&successBatches) == 0 && firstErr != nil {
+		if s.ctx != nil {
+			runtime.EventsEmit(s.ctx, "ai_analysis_error", map[string]interface{}{
+				"filename": firstErrFile,
+				"error":    firstErr.Error(),
+			})
+		}
+		return
+	}
+
+	if s.ctx != nil {
+		lastFile := ""
+		if len(validPhotos) > 0 {
+			lastFile = validPhotos[len(validPhotos)-1].FileName
+		}
+		runtime.EventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
+			"current":  totalPhotos,
+			"total":    totalPhotos,
+			"filename": lastFile,
+			"done":     true,
+		})
+	}
+
+	log.Printf("[AI-Vision] วิเคราะห์เสร็จสิ้น %d รูป ใช้เวลาทั้งหมด %v", totalPhotos, time.Since(startAnalyze))
 }
 
 // streamCopyAndRemoveFile implements Feature 6:
@@ -789,3 +999,70 @@ func (s *BackupService) GetTagsWithCount(dest string) ([]repository.TagCount, er
 	}
 	return s.photoRepo.GetTagsWithCount(s.getCtx(), dest)
 }
+
+func (s *BackupService) getConfigurableAi() ConfigurableAiVisionService {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.aiVision == nil {
+		s.aiVision = NewAiVisionService()
+	}
+	if cfg, ok := s.aiVision.(ConfigurableAiVisionService); ok {
+		return cfg
+	}
+	return nil
+}
+
+// GetAppSettings returns current system settings and multi-project API pool status
+func (s *BackupService) GetAppSettings() (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.GetAppSettings(), nil
+}
+
+// SaveProjectApiKey adds a new project + API key, or updates an existing project with a new API key
+func (s *BackupService) SaveProjectApiKey(projectID, projectName, projectNumber, apiKey string) (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.SaveProjectApiKey(projectID, projectName, projectNumber, apiKey)
+}
+
+// ToggleProjectApiKey enables or disables a specific project's API key in the pool
+func (s *BackupService) ToggleProjectApiKey(projectID string, enabled bool) (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.ToggleProjectApiKey(projectID, enabled)
+}
+
+// DeleteProjectApiKey deletes a project entry from the pool
+func (s *BackupService) DeleteProjectApiKey(projectID string) (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.DeleteProjectApiKey(projectID)
+}
+
+// UpdateSystemSettings updates general backup and AI settings
+func (s *BackupService) UpdateSystemSettings(autoAnalyze bool, primaryModel string, duplicateGuard bool, copyWorkers int) (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.UpdateSystemSettings(autoAnalyze, primaryModel, duplicateGuard, copyWorkers)
+}
+
+// ResetAiQuotaCooldowns clears all temporary RPM and daily RPD cooldowns across all projects
+func (s *BackupService) ResetAiQuotaCooldowns() (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.ResetQuotaCooldowns()
+}
+

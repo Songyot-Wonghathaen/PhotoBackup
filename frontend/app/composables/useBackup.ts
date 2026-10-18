@@ -55,6 +55,43 @@ const lastSummary = ref<MoveSummary>({
   has_run: false
 })
 
+let opStartTime = 0
+let timerInterval: any = null
+
+function formatDurationPretty(ms: number): string {
+  const totalSeconds = ms / 1000
+  if (totalSeconds < 60) {
+    return `${totalSeconds.toFixed(1)} วินาที`
+  }
+  const mins = Math.floor(totalSeconds / 60)
+  const secs = (totalSeconds % 60).toFixed(1)
+  return `${mins} นาที ${secs} วินาที`
+}
+
+function startLiveTimer() {
+  if (timerInterval) clearInterval(timerInterval)
+  timerInterval = setInterval(() => {
+    if (!opStartTime || !isAnalyzing.value) {
+      clearInterval(timerInterval)
+      timerInterval = null
+      return
+    }
+    const elapsed = Date.now() - opStartTime
+    lastSummary.value.duration_formatted = `${formatDurationPretty(elapsed)} (กำลังวิเคราะห์...)`
+  }, 500)
+}
+
+function stopLiveTimer() {
+  if (timerInterval) {
+    clearInterval(timerInterval)
+    timerInterval = null
+  }
+  if (opStartTime > 0) {
+    const elapsed = Date.now() - opStartTime
+    lastSummary.value.duration_formatted = formatDurationPretty(elapsed)
+  }
+}
+
 export function useBackup() {
   // Computed values
   const sourceTotalBytes = computed(() => {
@@ -270,6 +307,7 @@ export function useBackup() {
     }
 
     isProcessing.value = true
+    opStartTime = Date.now()
     try {
       if (typeof (window as any)?.go?.main?.App?.MovePhotos === 'function') {
         const summary = await (window as any).go.main.App.MovePhotos(selectedFiles.value, false)
@@ -286,6 +324,9 @@ export function useBackup() {
         if ((summary.moved_files || 0) > 0) {
           isAnalyzing.value = true
           aiProgress.value = { current: 0, total: summary.moved_files || 0, filename: '' }
+          startLiveTimer()
+        } else {
+          stopLiveTimer()
         }
         aiError.value = null // Clear any previous errors
         await refreshSourceFiles()
@@ -339,6 +380,7 @@ export function useBackup() {
     }
 
     isProcessing.value = true
+    opStartTime = Date.now()
     try {
       if (typeof (window as any)?.go?.main?.App?.MovePhotos === 'function') {
         const summary = await (window as any).go.main.App.MovePhotos([], true)
@@ -355,6 +397,9 @@ export function useBackup() {
         if ((summary.moved_files || 0) > 0) {
           isAnalyzing.value = true
           aiProgress.value = { current: 0, total: summary.moved_files || 0, filename: '' }
+          startLiveTimer()
+        } else {
+          stopLiveTimer()
         }
         aiError.value = null // Clear any previous errors
         if (typeof (window as any)?.go?.main?.App?.CheckIntegrity === 'function') {
@@ -406,6 +451,10 @@ export function useBackup() {
               tags: tags,
               path: destPath.value ? `${destPath.value}/${p.file_name}` : p.file_name
             }
+          }).sort((a, b) => {
+            if (a.description && !b.description) return -1
+            if (!a.description && b.description) return 1
+            return 0
           })
           return dbPhotos
         }
@@ -456,18 +505,37 @@ export function useBackup() {
 
     // Listen to AI analysis progress events from the Go background goroutine
     if (typeof (window as any)?.runtime?.EventsOn === 'function') {
-      (window as any).runtime.EventsOn('ai_analysis_progress', (data: any) => {
+      if (typeof (window as any)?.runtime?.EventsOff === 'function') {
+        ;(window as any).runtime.EventsOff('ai_analysis_progress')
+        ;(window as any).runtime.EventsOff('ai_analysis_error')
+      }
+      let lastFetchTime = 0
+      ;(window as any).runtime.EventsOn('ai_analysis_progress', (data: any) => {
         clearAiTimeout()
-        isAnalyzing.value = true
+        const cur = data?.current || 0
+        const tot = data?.total || 0
+        const isDone = Boolean(data?.done) || (tot > 0 && cur >= tot)
+
         aiProgress.value = {
-          current: data.current || 0,
-          total: data.total || 0,
-          filename: data.filename || ''
+          current: isDone ? tot : cur,
+          total: tot,
+          filename: data?.filename || ''
         }
-        // Keep the tab visible for a moment after the last photo finishes
-        if (data.current >= data.total) {
-          setTimeout(() => { isAnalyzing.value = false }, 1500)
+
+        // Live update: refresh DB records periodically or if user has results modal open
+        const now = Date.now()
+        if (isDone || showAiResultsModal.value || (now - lastFetchTime > 1200)) {
+          lastFetchTime = now
+          fetchDbPhotos()
+        }
+
+        if (isDone) {
+          stopLiveTimer()
+          setTimeout(() => {
+            isAnalyzing.value = false
+          }, 800)
         } else {
+          isAnalyzing.value = true
           // Reset watchdog for each event so we only fire if Go goes silent
           startAiTimeout()
         }
@@ -475,6 +543,7 @@ export function useBackup() {
 
       // Listen for per-file AI errors emitted by the Go background goroutine
       ;(window as any).runtime.EventsOn('ai_analysis_error', (data: any) => {
+        stopLiveTimer()
         const filename = data?.filename || 'ไฟล์ไม่ทราบชื่อ'
         const errMsg = data?.error || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ'
         aiError.value = `วิเคราะห์ภาพ "${filename}" ไม่สำเร็จ: ${errMsg}`
@@ -530,6 +599,7 @@ export function useBackup() {
     moveAllPhotos,
     fetchDbPhotos,
     analyzeSinglePhoto,
-    initBackupState
+    initBackupState,
+    stopLiveTimer
   }
 }

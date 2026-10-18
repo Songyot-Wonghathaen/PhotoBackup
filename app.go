@@ -176,3 +176,41 @@ func (a *App) SearchPhotosByTag(dest string, tagName string, limit int, offset i
 func (a *App) GetTagsWithCount(dest string) ([]repository.TagCount, error) {
 	return a.backupService.GetTagsWithCount(dest)
 }
+
+// CancelAnalysis stops any running background AI analysis immediately
+func (a *App) CancelAnalysis() {
+	if a.backupService != nil {
+		a.backupService.CancelAnalysis()
+	}
+}
+
+// GetAppSettings returns current system settings and multi-project API pool status
+func (a *App) GetAppSettings() (*dto.AppSettingsDTO, error) {
+	return a.backupService.GetAppSettings()
+}
+
+// SaveProjectApiKey adds a new project + API key, or updates an existing project with a new API key
+func (a *App) SaveProjectApiKey(projectID, projectName, projectNumber, apiKey string) (*dto.AppSettingsDTO, error) {
+	return a.backupService.SaveProjectApiKey(projectID, projectName, projectNumber, apiKey)
+}
+
+// ToggleProjectApiKey enables or disables a specific project's API key in the pool
+func (a *App) ToggleProjectApiKey(projectID string, enabled bool) (*dto.AppSettingsDTO, error) {
+	return a.backupService.ToggleProjectApiKey(projectID, enabled)
+}
+
+// DeleteProjectApiKey deletes a project entry from the pool
+func (a *App) DeleteProjectApiKey(projectID string) (*dto.AppSettingsDTO, error) {
+	return a.backupService.DeleteProjectApiKey(projectID)
+}
+
+// UpdateSystemSettings updates general backup and AI settings
+func (a *App) UpdateSystemSettings(autoAnalyze bool, primaryModel string, duplicateGuard bool, copyWorkers int) (*dto.AppSettingsDTO, error) {
+	return a.backupService.UpdateSystemSettings(autoAnalyze, primaryModel, duplicateGuard, copyWorkers)
+}
+
+// ResetAiQuotaCooldowns clears all temporary RPM and daily RPD cooldowns across all projects
+func (a *App) ResetAiQuotaCooldowns() (*dto.AppSettingsDTO, error) {
+	return a.backupService.ResetAiQuotaCooldowns()
+}
+

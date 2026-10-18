@@ -1,5 +1,83 @@
 export namespace dto {
 	
+	export class ProjectApiKeyEntry {
+	    id: string;
+	    project_name: string;
+	    project_number: string;
+	    api_key: string;
+	    enabled: boolean;
+	    status: string;
+	    cooldown_count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProjectApiKeyEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.project_name = source["project_name"];
+	        this.project_number = source["project_number"];
+	        this.api_key = source["api_key"];
+	        this.enabled = source["enabled"];
+	        this.status = source["status"];
+	        this.cooldown_count = source["cooldown_count"];
+	    }
+	}
+	export class AppSettingsDTO {
+	    auto_analyze: boolean;
+	    primary_model: string;
+	    duplicate_guard: boolean;
+	    copy_workers: number;
+	    active_key_count: number;
+	    total_project_count: number;
+	    primary_routes: number;
+	    total_routes: number;
+	    allocated_workers: number;
+	    batch_size: number;
+	    estimated_rpm: number;
+	    estimated_rpd: number;
+	    projects: ProjectApiKeyEntry[];
+	
+	    static createFrom(source: any = {}) {
+	        return new AppSettingsDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.auto_analyze = source["auto_analyze"];
+	        this.primary_model = source["primary_model"];
+	        this.duplicate_guard = source["duplicate_guard"];
+	        this.copy_workers = source["copy_workers"];
+	        this.active_key_count = source["active_key_count"];
+	        this.total_project_count = source["total_project_count"];
+	        this.primary_routes = source["primary_routes"];
+	        this.total_routes = source["total_routes"];
+	        this.allocated_workers = source["allocated_workers"];
+	        this.batch_size = source["batch_size"];
+	        this.estimated_rpm = source["estimated_rpm"];
+	        this.estimated_rpd = source["estimated_rpd"];
+	        this.projects = this.convertValues(source["projects"], ProjectApiKeyEntry);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class FileItem {
 	    filename: string;
 	    size_bytes: number;
@@ -162,6 +240,7 @@ export namespace dto {
 	        this.backed_up_at = source["backed_up_at"];
 	    }
 	}
+	
 	export class SearchParams {
 	    query: string;
 	    tag_ids: number[];
@@ -183,6 +262,7 @@ export namespace dto {
 	export class SearchResult {
 	    items: PhotoListItem[];
 	    total: number;
+	    analyzed_total: number;
 	    page: number;
 	    page_size: number;
 	    total_pages: number;
@@ -195,6 +275,7 @@ export namespace dto {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.items = this.convertValues(source["items"], PhotoListItem);
 	        this.total = source["total"];
+	        this.analyzed_total = source["analyzed_total"];
 	        this.page = source["page"];
 	        this.page_size = source["page_size"];
 	        this.total_pages = source["total_pages"];

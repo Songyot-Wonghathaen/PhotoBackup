@@ -28,6 +28,7 @@ export interface SearchParams {
 export interface SearchResult {
   items: PhotoListItem[]
   total: number
+  analyzed_total?: number
   page: number
   page_size: number
   total_pages: number
@@ -59,6 +60,7 @@ export interface TagCloudItem {
 export interface GalleryCard {
   id: number
   filename: string
+  full_path: string
   desc: string
   tags: string[]
   thumb_url: string
@@ -86,6 +88,7 @@ export function toGalleryCard(item: PhotoListItem): GalleryCard {
   return {
     id: item.id,
     filename: item.file_name,
+    full_path: item.full_path || '',
     desc: item.description || '',
     tags: item.tags || [],
     thumb_url: item.thumb_url || thumbUrl(item.id)

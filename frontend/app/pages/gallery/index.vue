@@ -9,13 +9,24 @@
         </p>
       </div>
 
-      <div class="header-count-pill">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="3" width="18" height="18" rx="2" />
-          <circle cx="8.5" cy="8.5" r="1.5" />
-          <polyline points="21 15 16 10 5 21" />
-        </svg>
-        <span>รูปทั้งหมด {{ total }}</span>
+      <div class="header-pills-row">
+        <!-- AI Progress Indicator -->
+        <div v-if="isAiAnalyzing || (total > 0 && analyzedTotal < total)" class="header-count-pill pill-ai-live">
+          <span class="pulse-dot"></span>
+          <span>AI วิเคราะห์แล้ว {{ Math.max(aiProgress.current, analyzedTotal) }}/{{ total }} รูป</span>
+        </div>
+        <div v-else-if="total > 0 && analyzedTotal >= total" class="header-count-pill pill-ai-done">
+          <span>✨ AI วิเคราะห์ครบแล้ว {{ total }}/{{ total }}</span>
+        </div>
+
+        <div class="header-count-pill">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <polyline points="21 15 16 10 5 21" />
+          </svg>
+          <span>รูปทั้งหมด {{ total }}</span>
+        </div>
       </div>
     </header>
 
@@ -74,7 +85,7 @@
           <input type="text" v-model="searchQuery" placeholder="ชายหาด พระอาทิตย์ตก" class="search-input" />
           <button v-if="searchQuery" class="btn-clear" @click="searchQuery = ''">✕</button>
         </div>
-        <button class="btn-submit-search" :disabled="photoApi.loading" @click="search(1, false)">
+        <button class="btn-submit-search" :disabled="photoApi.loading.value" @click="search(1, false)">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -132,8 +143,11 @@
             <template v-if="activeTab === 'desc'">
               พบ <strong>{{ total }} ภาพ</strong> สำหรับ "{{ searchQuery }}"
             </template>
+            <template v-else-if="selectedTag">
+              พบ <strong>{{ total }} ภาพ</strong> ที่มี Tag "{{ selectedTag }}"
+            </template>
             <template v-else>
-              พบ <strong>{{ total }} ภาพ</strong> ที่มี Tag "{{ selectedTag || 'ทั้งหมด' }}"
+              รูปภาพในโฟลเดอร์ <strong>{{ total }} ภาพ</strong> (วิเคราะห์คำอธิบายแล้ว {{ Math.max(aiProgress.current, analyzedTotal) }} ภาพ)
             </template>
           </h3>
 
@@ -202,9 +216,9 @@
         </div>
 
         <!-- Load more button while more pages are available -->
-        <div class="load-more-row" v-if="hasMore && !photoApi.error">
-          <button class="btn-load-more" :disabled="photoApi.loading" @click="loadMore()">
-            {{ photoApi.loading ? 'กำลังโหลด...' : 'โหลดเพิ่ม' }}
+        <div class="load-more-row" v-if="hasMore && !photoApi.error.value">
+          <button class="btn-load-more" :disabled="photoApi.loading.value" @click="loadMore()">
+            {{ photoApi.loading.value ? 'กำลังโหลด...' : 'โหลดเพิ่ม' }}
           </button>
         </div>
       </section>
@@ -213,7 +227,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useBackup } from '~/composables/useBackup'
 import { usePhotoApi, toGalleryCard, toTagCloudItems } from '~/composables/usePhotoApi'
 import type { GalleryCard, TagCloudItem } from '~/composables/usePhotoApi'
@@ -232,13 +246,19 @@ const selectedTagExists = ref<boolean | null>(null)
 // Discards responses from outdated requests (last write wins)
 let searchSeq = 0
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+let lastAiRefreshAt = 0
+let aiRefreshTimer: ReturnType<typeof setTimeout> | null = null
 const PAGE_SIZE = 24
+const thumbCache = new Map<string, string>()
 
 const tagCloudList = ref<TagCloudItem[]>([])
 const cards = ref<GalleryCard[]>([])
 const total = ref(0)
+const analyzedTotal = ref(0)
 const page = ref(1)
 const totalPages = ref(0)
+const aiProgress = ref({ current: 0, total: 0 })
+const isAiAnalyzing = ref(false)
 
 const suggestions = ['แมวนอนบนโซฟา', 'ภูเขาหิมะ', 'อาหารญี่ปุ่น', 'ครอบครัวปิกนิก']
 
@@ -273,6 +293,29 @@ async function loadCloud() {
   }
 }
 
+async function hydrateCardThumbnails(items: GalleryCard[]) {
+  const getThumbFn = (window as any)?.go?.main?.App?.GetThumbnailBase64
+  if (typeof getThumbFn !== 'function') return
+
+  for (const card of items) {
+    if (!card.full_path) continue
+    const cached = thumbCache.get(card.full_path)
+    if (cached) {
+      card.thumb_url = cached
+      continue
+    }
+    try {
+      const b64 = await getThumbFn(card.full_path)
+      if (b64) {
+        thumbCache.set(card.full_path, b64)
+        card.thumb_url = b64
+      }
+    } catch {
+      // ignore individual thumb error
+    }
+  }
+}
+
 // Feature 15/17: run the search; append=true loads the next page
 async function search(newPage: number, append: boolean) {
   if (!destPath.value) return
@@ -293,7 +336,7 @@ async function search(newPage: number, append: boolean) {
   }
   const result = await photoApi.searchPhotos(destPath.value, params)
   // Safety: ensure loading is cleared even if race condition occurs
-  clearLoading()
+  photoApi.clearLoading()
   if (seq !== searchSeq) return // stale response: thrown away
   if (!result) {
     if (!append) cards.value = []
@@ -301,11 +344,22 @@ async function search(newPage: number, append: boolean) {
     totalPages.value = 0
     return
   }
-  const mapped = (result.items || []).map(toGalleryCard)
+  const mapped = (result.items || []).map((item) => {
+    const c = toGalleryCard(item)
+    const cached = c.full_path ? thumbCache.get(c.full_path) : undefined
+    if (cached) c.thumb_url = cached
+    return c
+  })
   cards.value = append ? [...cards.value, ...mapped] : mapped
   total.value = result.total || 0
+  if (typeof result.analyzed_total === 'number') {
+    analyzedTotal.value = result.analyzed_total
+  }
   page.value = result.page || newPage
   totalPages.value = result.total_pages || 0
+
+  const sliceStart = append ? Math.max(0, cards.value.length - mapped.length) : 0
+  void hydrateCardThumbnails(cards.value.slice(sliceStart))
 }
 
 // 300ms debounce for the description search box
@@ -335,7 +389,7 @@ async function resolveSelectedTag(name: string): Promise<void> {
   // SuggestTags queries the existing tags table, including tags whose photos
   // are no longer active, so the empty state can remain accurate.
   const matches = await photoApi.suggestTags(name, 50)
-  clearLoading()
+  photoApi.clearLoading()
   const exact = matches?.find((tag) => tag.name === name)
   selectedTagId.value = exact?.id ?? null
   selectedTagExists.value = Boolean(exact)
@@ -366,9 +420,55 @@ function loadMore() {
   }
 }
 
-// Real thumbnails come from the asset server; fall back to the gradient art
-function onThumbError(card: GalleryCard) {
+// Real thumbnails come from the asset server or Wails IPC fallback; fall back to gradient art only if both fail
+async function onThumbError(card: GalleryCard) {
+  if (card.full_path && !card.thumb_url.startsWith('data:')) {
+    const cached = thumbCache.get(card.full_path)
+    if (cached) {
+      card.thumb_url = cached
+      return
+    }
+    const getThumbFn = (window as any)?.go?.main?.App?.GetThumbnailBase64
+    if (typeof getThumbFn === 'function') {
+      try {
+        const b64 = await getThumbFn(card.full_path)
+        if (b64) {
+          thumbCache.set(card.full_path, b64)
+          card.thumb_url = b64
+          return
+        }
+      } catch {
+        // fall through to clear thumb_url
+      }
+    }
+  }
   card.thumb_url = ''
+}
+
+function scheduleLiveAiRefresh(forceImmediate = false) {
+  const now = Date.now()
+  if (forceImmediate || now - lastAiRefreshAt >= 2000) {
+    lastAiRefreshAt = now
+    if (aiRefreshTimer) {
+      clearTimeout(aiRefreshTimer)
+      aiRefreshTimer = null
+    }
+    void loadCloud()
+    if (page.value <= 1) {
+      void search(1, false)
+    }
+    return
+  }
+  if (!aiRefreshTimer) {
+    aiRefreshTimer = setTimeout(() => {
+      aiRefreshTimer = null
+      lastAiRefreshAt = Date.now()
+      void loadCloud()
+      if (page.value <= 1) {
+        void search(1, false)
+      }
+    }, 2000 - (now - lastAiRefreshAt))
+  }
 }
 
 onMounted(async () => {
@@ -379,6 +479,19 @@ onMounted(async () => {
   }
   if (route.query.tag && typeof route.query.tag === 'string') {
     selectedTag.value = route.query.tag
+  }
+
+  if (typeof window !== 'undefined' && (window as any).runtime?.EventsOn) {
+    ;(window as any).runtime.EventsOn('ai_analysis_progress', (data: any) => {
+      if (data) {
+        aiProgress.value.current = data.current || 0
+        aiProgress.value.total = data.total || 0
+        isAiAnalyzing.value = (data.current || 0) < (data.total || 0)
+        analyzedTotal.value = Math.max(analyzedTotal.value, data.current || 0)
+      }
+      const done = data && data.current >= data.total
+      scheduleLiveAiRefresh(Boolean(done))
+    })
   }
 
   await loadCloud()
@@ -393,6 +506,13 @@ onMounted(async () => {
   }
   if (selectedTag.value) await resolveSelectedTag(selectedTag.value)
   await search(1, false)
+})
+
+onUnmounted(() => {
+  if (aiRefreshTimer) {
+    clearTimeout(aiRefreshTimer)
+    aiRefreshTimer = null
+  }
 })
 
 watch(destPath, async () => {
@@ -414,6 +534,50 @@ watch(destPath, async () => {
   overflow-x: hidden;
   user-select: none;
   font-family: 'Prompt', 'Inter', sans-serif;
+}
+
+.header-pills-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-count-pill.pill-ai-live {
+  background: #EEF2FF;
+  border-color: #C7D2FE;
+  color: #4338CA;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-count-pill.pill-ai-done {
+  background: #F0FDF4;
+  border-color: #BBF7D0;
+  color: #15803D;
+  font-weight: 600;
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #4F46E5;
+  box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.7);
+  animation: pulse-ring 1.5s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(79, 70, 229, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(79, 70, 229, 0);
+  }
 }
 
 /* Real data states: loading / error / empty */

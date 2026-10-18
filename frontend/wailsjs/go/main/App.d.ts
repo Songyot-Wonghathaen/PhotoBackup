@@ -6,9 +6,15 @@ import {model} from '../models';
 
 export function AnalyzePhoto(arg1:string):Promise<dto.VisionResult>;
 
+export function CancelAnalysis():Promise<void>;
+
 export function CheckIntegrity(arg1:string):Promise<dto.IntegrityResult>;
 
 export function DeletePhotos(arg1:Array<string>,arg2:boolean):Promise<number>;
+
+export function DeleteProjectApiKey(arg1:string):Promise<dto.AppSettingsDTO>;
+
+export function GetAppSettings():Promise<dto.AppSettingsDTO>;
 
 export function GetDestPath():Promise<string>;
 
@@ -34,6 +40,10 @@ export function ListSourcePhotos():Promise<Array<string>>;
 
 export function MovePhotos(arg1:Array<string>,arg2:boolean):Promise<dto.MoveSummary>;
 
+export function ResetAiQuotaCooldowns():Promise<dto.AppSettingsDTO>;
+
+export function SaveProjectApiKey(arg1:string,arg2:string,arg3:string,arg4:string):Promise<dto.AppSettingsDTO>;
+
 export function SearchPhotosByDescription(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<model.Photo>>;
 
 export function SearchPhotosByTag(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<model.Photo>>;
@@ -45,3 +55,7 @@ export function SelectSourceFolder():Promise<string>;
 export function SetDestPath(arg1:string):Promise<dto.IntegrityResult>;
 
 export function SetSourcePath(arg1:string):Promise<void>;
+
+export function ToggleProjectApiKey(arg1:string,arg2:boolean):Promise<dto.AppSettingsDTO>;
+
+export function UpdateSystemSettings(arg1:boolean,arg2:string,arg3:boolean,arg4:number):Promise<dto.AppSettingsDTO>;

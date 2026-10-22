@@ -34,6 +34,7 @@ type VisionResult = dto.VisionResult
 type AiVisionService interface {
 	AnalyzePhoto(ctx context.Context, filePath string) (*VisionResult, error)
 	IsAvailable() bool
+	ExpandSearchQuery(ctx context.Context, query string) ([]string, error)
 }
 
 // BatchAiVisionService is an optional extension implemented by geminiVisionService
@@ -553,18 +554,22 @@ func (s *geminiVisionService) callGeminiWithFallback(ctx context.Context, prompt
 			genCfg.ResponseMimeType = "application/json"
 		}
 
+		reqParts := []geminiPart{
+			{Text: prompt},
+		}
+		if encodedImage != "" {
+			reqParts = append(reqParts, geminiPart{
+				InlineData: &geminiInlineData{
+					MimeType: mimeType,
+					Data:     encodedImage,
+				},
+			})
+		}
+
 		reqPayload := geminiRequest{
 			Contents: []geminiContent{
 				{
-					Parts: []geminiPart{
-						{Text: prompt},
-						{
-							InlineData: &geminiInlineData{
-								MimeType: mimeType,
-								Data:     encodedImage,
-							},
-						},
-					},
+					Parts: reqParts,
 				},
 			},
 			GenerationConfig: genCfg,
@@ -1076,3 +1081,80 @@ func drawIndexBadge(dst *image.RGBA, x, y, index int) {
 		cx += charW + gap
 	}
 }
+
+// queryExpansionCache caches expanded search terms in memory to keep search snappy
+var queryExpansionCache sync.Map // map[string][]string
+
+// ExpandSearchQuery uses Gemini to expand a search query (e.g. "ขนมปังไหม้")
+// into specific and broader related terms in Thai to enable high-quality ranked searching.
+func (s *geminiVisionService) ExpandSearchQuery(ctx context.Context, query string) ([]string, error) {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	// 1. Fast in-memory cache lookup
+	cacheKey := strings.ToLower(trimmed)
+	if cached, ok := queryExpansionCache.Load(cacheKey); ok {
+		if terms, ok := cached.([]string); ok && len(terms) > 0 {
+			return terms, nil
+		}
+	}
+
+	if !s.IsAvailable() {
+		return []string{trimmed}, nil
+	}
+
+	prompt := fmt.Sprintf(`You are a search query expansion assistant for an image gallery in Thai.
+User query: "%s"
+
+Task:
+1. Break down the query into relevant search keywords in Thai (and English if relevant).
+2. The first item MUST be the original query "%s".
+3. Add close synonyms or specific variations (e.g. for "ขนมปังไหม้": "ขนมปังเกรียม", "ขนมปังดำ").
+4. Add broader base concepts/categories (e.g. "ขนมปังปิ้ง", "ขนมปัง", "toast") so that if specific photos are not found, relevant general photos can still be returned.
+5. Return ONLY a valid JSON array of strings (e.g. ["term1", "term2", "term3"]). Maximum 6 items. No explanation.`, trimmed, trimmed)
+
+	rawJSON, err := s.callGeminiWithFallback(ctx, prompt, "", "")
+	if err != nil {
+		log.Printf("[AI-Vision] ExpandSearchQuery fallback for '%s': %v", trimmed, err)
+		return []string{trimmed}, nil
+	}
+
+	var terms []string
+	if err := json.Unmarshal([]byte(rawJSON), &terms); err != nil {
+		start := strings.Index(rawJSON, "[")
+		end := strings.LastIndex(rawJSON, "]")
+		if start >= 0 && end > start {
+			_ = json.Unmarshal([]byte(rawJSON[start:end+1]), &terms)
+		}
+	}
+
+	cleanedTerms := make([]string, 0, len(terms)+1)
+	seen := make(map[string]bool)
+
+	// Ensure original query is the very first term
+	cleanedTerms = append(cleanedTerms, trimmed)
+	seen[strings.ToLower(trimmed)] = true
+
+	for _, t := range terms {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		lower := strings.ToLower(t)
+		if seen[lower] {
+			continue
+		}
+		seen[lower] = true
+		cleanedTerms = append(cleanedTerms, t)
+	}
+
+	if len(cleanedTerms) > 0 {
+		queryExpansionCache.Store(cacheKey, cleanedTerms)
+		return cleanedTerms, nil
+	}
+
+	return []string{trimmed}, nil
+}
+

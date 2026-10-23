@@ -25,6 +25,7 @@ type ConfigurableAiVisionService interface {
 	DeleteProjectApiKey(projectID string) (*dto.AppSettingsDTO, error)
 	UpdateSystemSettings(autoAnalyze bool, primaryModel string, duplicateGuard bool, copyWorkers int) (*dto.AppSettingsDTO, error)
 	ResetQuotaCooldowns() (*dto.AppSettingsDTO, error)
+	RestoreDefaultProjects() (*dto.AppSettingsDTO, error)
 	IsAutoAnalyzeEnabled() bool
 	IsDuplicateGuardEnabled() bool
 	GetCopyWorkers() int
@@ -34,11 +35,19 @@ type persistedAppSettings = model.PersistedAppSettings
 
 func settingsFilePath() string {
 	cwd, err := os.Getwd()
-	if err == nil {
+	if err == nil && cwd != "/" && cwd != "\\" {
 		p := filepath.Join(cwd, "database", "ai_settings.json")
 		if _, statErr := os.Stat(filepath.Dir(p)); statErr == nil {
 			return p
 		}
+		if mkErr := os.MkdirAll(filepath.Dir(p), 0755); mkErr == nil {
+			return p
+		}
+	}
+	if cfgDir, cfgErr := os.UserConfigDir(); cfgErr == nil {
+		appDir := filepath.Join(cfgDir, "PhotoVault", "database")
+		_ = os.MkdirAll(appDir, 0755)
+		return filepath.Join(appDir, "ai_settings.json")
 	}
 	return "database/ai_settings.json"
 }
@@ -67,67 +76,66 @@ func ComputeSmartWorkers(activeKeys int) int {
 	}
 }
 
-// embeddedSeedKeysBase64 contains initial default API keys embedded directly into the build.
+// embeddedDefaultSettingsBase64 contains initial default settings and all 10 projects/keys embedded directly into the build.
 // Stored base64-encoded to protect from accidental regex exposure and pass Git push protection.
-var embeddedSeedKeysBase64 = []string{
-	"QVEuQWI4Uk42Sk9ydzMzeDAtV3laMDBLNUlVY3d3TFFPb0YtcnR2WHRYT05uU3RJQl9fcFE=",
-	"QVEuQWI4Uk42SXI4ZWlVRkp4MzJ3aXBoNGVJY0U4LXpBeEtjMF8zUWlMOUxZTWh2aDlidlE=",
-	"QVEuQWI4Uk42SkRTR1N5a0JGZDNYU3VDc2tFdnFyZVA1SWpLc015WkhZaTZfTWJwdkFranc=",
-	"QVEuQWI4Uk42SURXc3o2VWMteXpiSnZ4c0RFSjY2Qi1TcjRpU3pDUnhrOU5jSDNCUmNXbnc=",
-	"QVEuQWI4Uk42TEdIMFV0ZUNHSnhld0NmRDZxWUxwckJ3Q0pSTzUySUJ6MDVZV2ZFU01XZnc=",
+const embeddedDefaultSettingsBase64 = "ewogICJhdXRvX2FuYWx5emUiOiB0cnVlLAogICJwcmltYXJ5X21vZGVsIjogImF1dG8iLAogICJkdXBsaWNhdGVfZ3VhcmQiOiB0cnVlLAogICJjb3B5X3dvcmtlcnMiOiAxNiwKICAicHJvamVjdHMiOiBbCiAgICB7CiAgICAgICJpZCI6ICJwcm9qLTEiLAogICAgICAicHJvamVjdF9uYW1lIjogIlByb2plY3QgMSAoQWNjb3VudCAxKSIsCiAgICAgICJwcm9qZWN0X251bWJlciI6ICIyODUzMjg5OTI3MzIiLAogICAgICAiYXBpX2tleSI6ICJBUS5BYjhSTjZKT3J3MzN4MC1XeVowMEs1SVVjd3dMUU9vRi1ydHZYdFhPTm5TdElCX19wUSIsCiAgICAgICJlbmFibGVkIjogdHJ1ZSwKICAgICAgInN0YXR1cyI6ICIiLAogICAgICAiY29vbGRvd25fY291bnQiOiAwCiAgICB9LAogICAgewogICAgICAiaWQiOiAicHJvai0yIiwKICAgICAgInByb2plY3RfbmFtZSI6ICJQcm9qZWN0IDIgKEFjY291bnQgMSkiLAogICAgICAicHJvamVjdF9udW1iZXIiOiAiOTE3ODQzMzMyNzc2IiwKICAgICAgImFwaV9rZXkiOiAiQVEuQWI4Uk42S09nWjRiR0NzVGstY05PSEgxRm5EbkpEdHBMQ0hRUTNxRnVYZUt2VUpLZEEiLAogICAgICAiZW5hYmxlZCI6IHRydWUsCiAgICAgICJzdGF0dXMiOiAiIiwKICAgICAgImNvb2xkb3duX2NvdW50IjogMAogICAgfSwKICAgIHsKICAgICAgImlkIjogInByb2otMyIsCiAgICAgICJwcm9qZWN0X25hbWUiOiAiUHJvamVjdCAzIChBY2NvdW50IDEpIiwKICAgICAgInByb2plY3RfbnVtYmVyIjogIjMzNTk3NjUzNTg3NSIsCiAgICAgICJhcGlfa2V5IjogIkFRLkFiOFJONklRUTd4bDRKeEc2SndlOVA5cFRRQ2h5Q1Nzb184X1QySFFnRXlETWdIRjNRIiwKICAgICAgImVuYWJsZWQiOiB0cnVlLAogICAgICAic3RhdHVzIjogIiIsCiAgICAgICJjb29sZG93bl9jb3VudCI6IDAKICAgIH0sCiAgICB7CiAgICAgICJpZCI6ICJwcm9qLTQiLAogICAgICAicHJvamVjdF9uYW1lIjogIlByb2plY3QgNCAoQWNjb3VudCAxKSIsCiAgICAgICJwcm9qZWN0X251bWJlciI6ICIxNjMxNTY2MzE4NTYiLAogICAgICAiYXBpX2tleSI6ICJBUS5BYjhSTjZLQ2RZaVc3cVZhZElWYTdRMklWdnVEdUZFV1lHaVJwOE02VllYeENtNXBJZyIsCiAgICAgICJlbmFibGVkIjogdHJ1ZSwKICAgICAgInN0YXR1cyI6ICIiLAogICAgICAiY29vbGRvd25fY291bnQiOiAwCiAgICB9LAogICAgewogICAgICAiaWQiOiAicHJvai01IiwKICAgICAgInByb2plY3RfbmFtZSI6ICJQcm9qZWN0IDUgKEFjY291bnQgMSkiLAogICAgICAicHJvamVjdF9udW1iZXIiOiAiODUzNDk5MjI0MDk5IiwKICAgICAgImFwaV9rZXkiOiAiQVEuQWI4Uk42TG4xbF9FMENrRVlJeEhCQV9mSWxwLTNnemRTWnVHT1JBa1Iwa1ZBSi11NXciLAogICAgICAiZW5hYmxlZCI6IHRydWUsCiAgICAgICJzdGF0dXMiOiAiIiwKICAgICAgImNvb2xkb3duX2NvdW50IjogMAogICAgfSwKICAgIHsKICAgICAgImlkIjogInByb2otNiIsCiAgICAgICJwcm9qZWN0X25hbWUiOiAicHJvamVjdCBDcm9zcyBQbGF0Zm9ybSBNb2JpbGU2IiwKICAgICAgInByb2plY3RfbnVtYmVyIjogIjEwNjE3Mzc2MjIxNzgiLAogICAgICAiYXBpX2tleSI6ICJBUS5BYjhSTjZLQmtjdVBsZWM0dnA2MTY1dWVHTmlPSkk1U3lWU1VjSk5lQk9IN0V5RkhwZyIsCiAgICAgICJlbmFibGVkIjogdHJ1ZSwKICAgICAgInN0YXR1cyI6ICIiLAogICAgICAiY29vbGRvd25fY291bnQiOiAwCiAgICB9LAogICAgewogICAgICAiaWQiOiAicHJvai03IiwKICAgICAgInByb2plY3RfbmFtZSI6ICJwcm9qZWN0IENyb3NzIFBsYXRmb3JtIE1vYmlsZTciLAogICAgICAicHJvamVjdF9udW1iZXIiOiAiODk4MTQ0MDg1NjYyIiwKICAgICAgImFwaV9rZXkiOiAiQVEuQWI4Uk42SXNQeWlFbWVDdHd3eFlpZ0RtNXFSRHJETFdlVnh6VHhoaDh1OXczUldjRGciLAogICAgICAiZW5hYmxlZCI6IHRydWUsCiAgICAgICJzdGF0dXMiOiAiIiwKICAgICAgImNvb2xkb3duX2NvdW50IjogMAogICAgfSwKICAgIHsKICAgICAgImlkIjogInByb2otOCIsCiAgICAgICJwcm9qZWN0X25hbWUiOiAicHJvamVjdCBDcm9zcyBQbGF0Zm9ybSBNb2JpbGU4IiwKICAgICAgInByb2plY3RfbnVtYmVyIjogIjEwMTI0NTQzNDcyOTEiLAogICAgICAiYXBpX2tleSI6ICJBUS5BYjhSTjZKVUF3TFB3cVFudGFwM2F2TTk5VnNqOHNzUjM3bWVEMGc2RWhiTTk1bHREQSIsCiAgICAgICJlbmFibGVkIjogdHJ1ZSwKICAgICAgInN0YXR1cyI6ICIiLAogICAgICAiY29vbGRvd25fY291bnQiOiAwCiAgICB9LAogICAgewogICAgICAiaWQiOiAicHJvai05IiwKICAgICAgInByb2plY3RfbmFtZSI6ICJwcm9qZWN0IENyb3NzIFBsYXRmb3JtIE1vYmlsZTkiLAogICAgICAicHJvamVjdF9udW1iZXIiOiAiMzY5MDczNzM3MzQ4IiwKICAgICAgImFwaV9rZXkiOiAiQVEuQWI4Uk42S3ZvLXFTSmdWUGVleXFJd1c0SmZld1I4REFqWkxIOEZqdXlKelJidXlZWmciLAogICAgICAiZW5hYmxlZCI6IHRydWUsCiAgICAgICJzdGF0dXMiOiAiIiwKICAgICAgImNvb2xkb3duX2NvdW50IjogMAogICAgfSwKICAgIHsKICAgICAgImlkIjogInByb2otMTAiLAogICAgICAicHJvamVjdF9uYW1lIjogInByb2plY3QgQ3Jvc3MgUGxhdGZvcm1Nb2JpbGUxMCIsCiAgICAgICJwcm9qZWN0X251bWJlciI6ICI0OTU1NzI4MzI1MzAiLAogICAgICAiYXBpX2tleSI6ICJBUS5BYjhSTjZKdzZvcXVKeDJaZ21VcFRxaUpiR2VfalNxRDBhU2RzaU5GMVZuQ1NfRkxMdyIsCiAgICAgICJlbmFibGVkIjogdHJ1ZSwKICAgICAgInN0YXR1cyI6ICIiLAogICAgICAiY29vbGRvd25fY291bnQiOiAwCiAgICB9CiAgXQp9"
+
+// getDefaultEmbeddedSettings returns the 10 built-in default projects decoded at runtime
+func getDefaultEmbeddedSettings() persistedAppSettings {
+	var settings persistedAppSettings
+	raw, err := base64.StdEncoding.DecodeString(embeddedDefaultSettingsBase64)
+	if err == nil {
+		if jsonErr := json.Unmarshal(raw, &settings); jsonErr == nil && len(settings.Projects) > 0 {
+			return settings
+		}
+	}
+	return persistedAppSettings{
+		AutoAnalyze:    true,
+		PrimaryModel:   "auto",
+		DuplicateGuard: true,
+		CopyWorkers:    16,
+	}
 }
 
-// getEmbeddedDefaultKeys returns the 5 default API keys decoded at runtime
+// getEmbeddedDefaultKeys returns the API keys from all embedded default projects
 func getEmbeddedDefaultKeys() []string {
 	var keys []string
-	for _, enc := range embeddedSeedKeysBase64 {
-		b, err := base64.StdEncoding.DecodeString(enc)
-		if err == nil && len(b) > 0 {
-			keys = append(keys, string(b))
+	defaults := getDefaultEmbeddedSettings()
+	for _, p := range defaults.Projects {
+		k := strings.TrimSpace(p.ApiKey)
+		if k != "" {
+			keys = append(keys, k)
 		}
 	}
 	return keys
 }
 
+// defaultSeedProjects returns the embedded 10 projects, optionally merging any env keys
 func defaultSeedProjects(envKeys []string) []dto.ProjectApiKeyEntry {
-	seenKey := make(map[string]bool)
-	var allKeys []string
+	embedded := getDefaultEmbeddedSettings()
+	if len(envKeys) == 0 {
+		return embedded.Projects
+	}
+	seen := make(map[string]bool)
+	for _, p := range embedded.Projects {
+		if k := strings.TrimSpace(p.ApiKey); k != "" {
+			seen[k] = true
+		}
+	}
 	for _, k := range envKeys {
 		k = strings.TrimSpace(k)
-		if k != "" && !seenKey[k] {
-			seenKey[k] = true
-			allKeys = append(allKeys, k)
+		if k != "" && !seen[k] && len(embedded.Projects) < 10 {
+			seen[k] = true
+			pNum := len(embedded.Projects) + 1
+			embedded.Projects = append(embedded.Projects, dto.ProjectApiKeyEntry{
+				ID:          fmt.Sprintf("proj-%d", pNum),
+				ProjectName: fmt.Sprintf("Project %d", pNum),
+				ApiKey:      k,
+				Enabled:     true,
+			})
 		}
 	}
-	for _, emb := range getEmbeddedDefaultKeys() {
-		emb = strings.TrimSpace(emb)
-		if emb != "" && !seenKey[emb] {
-			seenKey[emb] = true
-			allKeys = append(allKeys, emb)
-		}
-	}
-
-	count := len(allKeys)
-	if count < 10 {
-		count = 10
-	}
-
-	var entries []dto.ProjectApiKeyEntry
-	for i := 0; i < count; i++ {
-		keyVal := ""
-		if i < len(allKeys) {
-			keyVal = strings.TrimSpace(allKeys[i])
-		}
-		entries = append(entries, dto.ProjectApiKeyEntry{
-			ID:            fmt.Sprintf("proj-%d", i+1),
-			ProjectName:   fmt.Sprintf("Project %d", i+1),
-			ProjectNumber: "",
-			ApiKey:        keyVal,
-			Enabled:       keyVal != "",
-		})
-	}
-
-	return entries
+	return embedded.Projects
 }
 
 func (s *geminiVisionService) initSettings(envKeys []string) {
@@ -158,50 +166,6 @@ func (s *geminiVisionService) initSettings(envKeys []string) {
 		}
 		if loaded.PrimaryModel == "" {
 			loaded.PrimaryModel = "auto"
-		}
-
-		// Ensure at least the 5 embedded default keys are populated if user has empty project slots
-		embKeys := getEmbeddedDefaultKeys()
-		hasKeyMap := make(map[string]bool)
-		activeCount := 0
-		for _, p := range loaded.Projects {
-			k := strings.TrimSpace(p.ApiKey)
-			if k != "" && p.Enabled {
-				activeCount++
-				hasKeyMap[k] = true
-			}
-		}
-		if activeCount < 5 {
-			for _, emb := range embKeys {
-				if hasKeyMap[emb] {
-					continue
-				}
-				filled := false
-				for i := range loaded.Projects {
-					if strings.TrimSpace(loaded.Projects[i].ApiKey) == "" {
-						loaded.Projects[i].ApiKey = emb
-						loaded.Projects[i].Enabled = true
-						hasKeyMap[emb] = true
-						activeCount++
-						filled = true
-						break
-					}
-				}
-				if !filled && len(loaded.Projects) < 10 {
-					pNum := len(loaded.Projects) + 1
-					loaded.Projects = append(loaded.Projects, dto.ProjectApiKeyEntry{
-						ID:          fmt.Sprintf("proj-%d", pNum),
-						ProjectName: fmt.Sprintf("Project %d", pNum),
-						ApiKey:      emb,
-						Enabled:     true,
-					})
-					hasKeyMap[emb] = true
-					activeCount++
-				}
-				if activeCount >= 5 {
-					break
-				}
-			}
 		}
 	}
 
@@ -636,6 +600,26 @@ func (s *geminiVisionService) ResetQuotaCooldowns() (*dto.AppSettingsDTO, error)
 
 	log.Printf("[AI-Settings] รีเซ็ตสถานะพักโควตา (Cooldown/RPD) ของทุกโปรเจกต์และโมเดลเรียบร้อยแล้ว")
 	return s.GetAppSettings(), nil
+}
+
+// RestoreDefaultProjects restores the 10 built-in default projects and API keys
+func (s *geminiVisionService) RestoreDefaultProjects() (*dto.AppSettingsDTO, error) {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
+
+	defaults := getDefaultEmbeddedSettings()
+	s.settings = &defaults
+
+	s.syncActiveKeysLocked(true)
+	s.saveSettingsFileLocked()
+
+	s.cooldownMu.Lock()
+	s.cooldowns = make(map[string]time.Time)
+	s.saveQuotaCacheLocked()
+	s.cooldownMu.Unlock()
+
+	log.Printf("[AI-Settings] คืนค่า 10 โครงการตั้งต้นและ API Keys เรียบร้อยแล้ว")
+	return s.buildSettingsDTOLocked(), nil
 }
 
 func (s *geminiVisionService) IsAutoAnalyzeEnabled() bool {

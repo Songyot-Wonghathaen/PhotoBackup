@@ -9,6 +9,13 @@
         </p>
       </div>
       <div class="header-actions">
+        <button class="btn-outline" @click="handleRestoreDefaultKeys" :disabled="isSaving" title="คืนค่าเป็น 10 โครงการและ API Key ตั้งต้นของระบบ">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+            <path d="M3 3v5h5"/>
+          </svg>
+          ใช้ 10 คีย์ตั้งต้น
+        </button>
         <button class="btn-outline" @click="handleResetCooldowns" :disabled="isSaving">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
@@ -91,6 +98,14 @@
             @click="switchMode('new')"
           >
             เพิ่มโปรเจกต์ใหม่ {{ settings.projects.length >= 10 ? '(ครบ 10 แล้ว)' : '' }}
+          </button>
+          <button
+            class="mode-tab default-keys-tab"
+            @click="handleRestoreDefaultKeys"
+            :disabled="isSaving"
+            title="คืนค่าเป็น 10 โครงการและ API Key ตั้งต้นของระบบ"
+          >
+            ใช้ 10 คีย์ตั้งต้น
           </button>
         </div>
 
@@ -588,6 +603,26 @@ async function handleSaveSystemSettings() {
   }
 }
 
+async function handleRestoreDefaultKeys() {
+  if (!confirm('ต้องการคืนค่าเป็น 10 โครงการและ API Keys ตั้งต้นของระบบหรือไม่?')) {
+    return
+  }
+
+  const bridge = getBackendBridge()
+  if (!bridge || typeof bridge.RestoreDefaultProjects !== 'function') return
+
+  isSaving.value = true
+  try {
+    const res = await bridge.RestoreDefaultProjects()
+    applySettingsResponse(res)
+    showStatus('คืนค่า 10 โครงการและ API Keys ตั้งต้นเรียบร้อยแล้ว')
+  } catch (err: any) {
+    showStatus(err?.message || String(err), 'error')
+  } finally {
+    isSaving.value = false
+  }
+}
+
 async function handleResetCooldowns() {
   const bridge = getBackendBridge()
   if (!bridge || typeof bridge.ResetAiQuotaCooldowns !== 'function') return
@@ -829,6 +864,16 @@ onMounted(() => {
   background: #4F46E5;
   color: #FFFFFF;
   border-color: #4F46E5;
+}
+
+.mode-tab.default-keys-tab {
+  border-color: #6366F1;
+  color: #4F46E5;
+  background: #EEF2FF;
+}
+
+.mode-tab.default-keys-tab:hover {
+  background: #E0E7FF;
 }
 
 .api-form-box {

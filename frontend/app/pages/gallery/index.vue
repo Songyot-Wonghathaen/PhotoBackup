@@ -85,7 +85,7 @@
           <input type="text" v-model="searchQuery" placeholder="ชายหาด พระอาทิตย์ตก" class="search-input" />
           <button v-if="searchQuery" class="btn-clear" @click="searchQuery = ''">✕</button>
         </div>
-        <button class="btn-submit-search" :disabled="photoApi.loading.value" @click="search(1, false)">
+        <button class="btn-submit-search" :disabled="isSearching || photoApi.loading.value" @click="search(1, false)">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -138,7 +138,7 @@
             @click="selectTag(item)">
             {{ item.name }}
           </span>
-          <span v-if="tagCloudList.length === 0 && !photoApi.loading" class="cloud-empty">
+          <span v-if="tagCloudList.length === 0 && !isSearching" class="cloud-empty">
             ยังไม่มี Tag ในโฟลเดอร์ปลายทางนี้
           </span>
         </div>
@@ -179,8 +179,8 @@
           </div>
         </div>
 
-        <!-- Loading is shown only while the API request is in progress. -->
-        <div v-if="photoApi.loading && cards.length === 0" class="gallery-state gallery-loading">
+        <!-- Loading is shown only while searching is active -->
+        <div v-if="isSearching && cards.length === 0" class="gallery-state gallery-loading">
           <span class="state-spinner"></span>
           <span>กำลังค้นหารูปภาพ...</span>
         </div>
@@ -270,6 +270,7 @@ const searchQuery = ref('')
 const selectedTag = ref('')
 const selectedTagId = ref<number | null>(null)
 const selectedTagExists = ref<boolean | null>(null)
+const isSearching = ref(false)
 
 // Discards responses from outdated requests (last write wins)
 let searchSeq = 0
@@ -391,44 +392,53 @@ async function search(newPage: number, append: boolean) {
     if (!append) cards.value = []
     total.value = 0
     totalPages.value = 0
+    isSearching.value = false
     return
   }
   const seq = ++searchSeq
+  if (!append) {
+    isSearching.value = true
+  }
   const params = {
     query: activeTab.value === 'desc' ? searchQuery.value.trim() : '',
     tag_ids: activeTab.value === 'tag' && selectedTagId.value ? [selectedTagId.value] : [],
     page: newPage,
     page_size: PAGE_SIZE
   }
-  const result = await photoApi.searchPhotos(destPath.value, params)
-  // Safety: ensure loading is cleared even if race condition occurs
-  photoApi.clearLoading()
-  if (seq !== searchSeq) return // stale response: thrown away
-  if (!result) {
-    if (!append) cards.value = []
-    total.value = 0
-    totalPages.value = 0
-    return
-  }
-  const mapped = (result.items || []).map((item) => {
-    const c = toGalleryCard(item)
-    const cached = c.full_path ? thumbCache.get(c.full_path) : undefined
-    if (cached) c.thumb_url = cached
-    return c
-  })
-  cards.value = append ? [...cards.value, ...mapped] : mapped
-  total.value = result.total || 0
-  if (!append) {
-    expandedTerms.value = result.expanded_terms || []
-  }
-  if (typeof result.analyzed_total === 'number') {
-    analyzedTotal.value = result.analyzed_total
-  }
-  page.value = result.page || newPage
-  totalPages.value = result.total_pages || 0
+  try {
+    const result = await photoApi.searchPhotos(destPath.value, params)
+    photoApi.clearLoading()
+    if (seq !== searchSeq) return // stale response: thrown away
+    if (!result) {
+      if (!append) cards.value = []
+      total.value = 0
+      totalPages.value = 0
+      return
+    }
+    const mapped = (result.items || []).map((item) => {
+      const c = toGalleryCard(item)
+      const cached = c.full_path ? thumbCache.get(c.full_path) : undefined
+      if (cached) c.thumb_url = cached
+      return c
+    })
+    cards.value = append ? [...cards.value, ...mapped] : mapped
+    total.value = result.total || 0
+    if (!append) {
+      expandedTerms.value = result.expanded_terms || []
+    }
+    if (typeof result.analyzed_total === 'number') {
+      analyzedTotal.value = result.analyzed_total
+    }
+    page.value = result.page || newPage
+    totalPages.value = result.total_pages || 0
 
-  const sliceStart = append ? Math.max(0, cards.value.length - mapped.length) : 0
-  void hydrateCardThumbnails(cards.value.slice(sliceStart))
+    const sliceStart = append ? Math.max(0, cards.value.length - mapped.length) : 0
+    void hydrateCardThumbnails(cards.value.slice(sliceStart))
+  } finally {
+    if (seq === searchSeq) {
+      isSearching.value = false
+    }
+  }
 }
 
 // 300ms debounce for the description search box

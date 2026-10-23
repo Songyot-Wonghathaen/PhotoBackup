@@ -1,12 +1,12 @@
 <template>
   <div class="photo-detail-page">
     <!-- Loading / error states bound to real API status -->
-    <div v-if="photoApi.loading && !photo" class="detail-state detail-loading">
+    <div v-if="photoApi.loading.value && !photo" class="detail-state detail-loading">
       <span class="state-spinner"></span>
       <span>กำลังโหลดข้อมูลรูปภาพ...</span>
     </div>
-    <div v-else-if="photoApi.error && !photo" class="detail-state detail-error">
-      <span>{{ photoApi.error }}</span>
+    <div v-else-if="photoApi.error.value && !photo" class="detail-state detail-error">
+      <span>{{ photoApi.error.value }}</span>
       <button class="btn-state-retry" @click="loadDetail()">ลองอีกครั้ง</button>
     </div>
 

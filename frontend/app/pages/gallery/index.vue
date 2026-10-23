@@ -256,12 +256,15 @@ const route = useRoute()
 const { destPath } = useBackup()
 const photoApi = usePhotoApi()
 
-// Default to 'tag' mode matching Screen 2 Search by Tag provided by user
-const activeTab = ref<'desc' | 'tag'>('tag')
-const searchQuery = ref('')
-const selectedTag = ref('')
-const selectedTagId = ref<number | null>(null)
-const selectedTagExists = ref<boolean | null>(null)
+// Persistent search and filter state across navigation
+const {
+  activeTab,
+  searchQuery,
+  selectedTag,
+  selectedTagId,
+  selectedTagExists,
+  hasInitialized
+} = useGalleryState()
 const isSearching = ref(false)
 
 // Discards responses from outdated requests (last write wins)
@@ -543,13 +546,17 @@ function scheduleLiveAiRefresh(forceImmediate = false) {
 }
 
 onMounted(async () => {
-  if (route.query.tab === 'desc') {
-    activeTab.value = 'desc'
-  } else if (route.query.tab === 'tag') {
-    activeTab.value = 'tag'
+  // If route query params exist, sync with them
+  if (route.query.tab === 'desc' || route.query.tab === 'tag') {
+    activeTab.value = route.query.tab as 'desc' | 'tag'
   }
-  if (route.query.tag && typeof route.query.tag === 'string') {
+  if (typeof route.query.q === 'string' && route.query.q) {
+    searchQuery.value = route.query.q
+    activeTab.value = 'desc'
+  }
+  if (typeof route.query.tag === 'string' && route.query.tag) {
     selectedTag.value = route.query.tag
+    activeTab.value = 'tag'
   }
 
   if (typeof window !== 'undefined' && (window as any).runtime?.EventsOn) {
@@ -566,7 +573,7 @@ onMounted(async () => {
   }
 
   await loadCloud()
-  if (selectedTag.value && tagCloudList.value.length > 0) {
+  if (activeTab.value === 'tag' && selectedTag.value && tagCloudList.value.length > 0) {
     const found = tagCloudList.value.find((t) => t.name === selectedTag.value)
     if (found) {
       selectedTagId.value = found.id
@@ -575,7 +582,9 @@ onMounted(async () => {
       return
     }
   }
-  if (selectedTag.value) await resolveSelectedTag(selectedTag.value)
+  if (activeTab.value === 'tag' && selectedTag.value) {
+    await resolveSelectedTag(selectedTag.value)
+  }
   await search(1, false)
 })
 

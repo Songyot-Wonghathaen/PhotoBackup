@@ -18,14 +18,14 @@
           <p class="header-subtitle">รายละเอียดรูปภาพ</p>
         </div>
 
-        <NuxtLink to="/gallery" class="btn-back">
+        <button type="button" class="btn-back" @click="handleBack">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <line x1="19" y1="12" x2="5" y2="12" />
             <polyline points="12 19 5 12 12 5" />
           </svg>
           <span>กลับไปแกลเลอรี่</span>
-        </NuxtLink>
+        </button>
       </header>
 
       <!-- Main 2-Column Content Layout -->
@@ -210,12 +210,21 @@ import type { PhotoDetail, PhotoListItem, TagItem } from '~/composables/usePhoto
 import { formatBytes } from '~/utils/formatters'
 
 const route = useRoute()
+const router = useRouter()
 const { destPath } = useBackup()
 const photoApi = usePhotoApi()
 
 const photoId = computed(() => Number(route.params.idx))
 const photo = ref<PhotoDetail | null>(null)
 const strip = ref<PhotoListItem[]>([])
+
+function handleBack() {
+  if (typeof window !== 'undefined' && window.history.length > 1) {
+    router.back()
+  } else {
+    router.push('/gallery')
+  }
+}
 
 // Description editing (Feature 19)
 const isEditingDesc = ref(false)
@@ -668,6 +677,7 @@ watch(photoId, async () => {
   padding: 8px 18px;
   border-radius: 10px;
   text-decoration: none;
+  cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   transition: all 0.15s ease;
 }

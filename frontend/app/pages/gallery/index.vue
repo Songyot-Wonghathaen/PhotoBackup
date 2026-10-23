@@ -154,20 +154,27 @@
         <div class="results-header">
           <h3 class="results-count">
             <template v-if="activeTab === 'desc'">
-              พบ <strong>{{ total }} ภาพ</strong> สำหรับ "{{ searchQuery }}"
+              <template v-if="searchQuery.trim()">
+                <span v-if="total > 0">พบ <strong>{{ total }} ภาพ</strong> สำหรับ "{{ searchQuery }}"</span>
+                <span v-else class="text-not-found">ไม่พบรูปภาพสำหรับ "{{ searchQuery }}"</span>
+              </template>
+              <template v-else>
+                รูปภาพในโฟลเดอร์ <strong>{{ total }} ภาพ</strong> (วิเคราะห์คำอธิบายแล้ว {{ Math.max(aiProgress.current, analyzedTotal) }} ภาพ)
+              </template>
             </template>
             <template v-else-if="selectedTag">
-              พบ <strong>{{ total }} ภาพ</strong> ที่มี Tag "{{ selectedTag }}"
+              <span v-if="total > 0">พบ <strong>{{ total }} ภาพ</strong> ที่มี Tag "{{ selectedTag }}"</span>
+              <span v-else class="text-not-found">ไม่พบรูปภาพที่มี Tag "{{ selectedTag }}"</span>
             </template>
             <template v-else>
-              รูปภาพในโฟลเดอร์ <strong>{{ total }} ภาพ</strong> (วิเคราะห์คำอธิบายแล้ว {{ Math.max(aiProgress.current, analyzedTotal) }} ภาพ)
+              รูปภาพในโฟลเดอร์ <strong>{{ total }} ภาพ</strong>
             </template>
           </h3>
 
-          <div class="sort-selector" v-if="activeTab === 'desc'">
+          <div class="sort-selector" v-if="activeTab === 'desc' && total > 0">
             <span>เรียงตาม: ความเกี่ยวข้อง</span>
           </div>
-          <div class="sort-selector" v-else>
+          <div class="sort-selector" v-else-if="total > 0">
             <span>แสดง {{ cards.length }} จาก {{ total }}</span>
           </div>
         </div>
@@ -175,57 +182,65 @@
         <!-- Loading is shown only while the API request is in progress. -->
         <div v-if="photoApi.loading && cards.length === 0" class="gallery-state gallery-loading">
           <span class="state-spinner"></span>
-          <span>กำลังโหลดรูปภาพ</span>
+          <span>กำลังค้นหารูปภาพ...</span>
         </div>
 
-        <!-- One shared result-card template for description and tag searches. -->
-        <div v-else class="gallery-cards-grid">
-          <template v-if="cards.length > 0">
-            <div v-for="(card, i) in displayedPhotos" :key="card.id || i" class="gallery-card">
-              <!-- Thumbnail from the asset server (/thumb/{id}), gradient art as fallback -->
-              <NuxtLink :to="'/gallery/' + card.id" class="card-thumb-link">
-                <div class="card-thumb">
-                  <img v-if="card.thumb_url" :src="card.thumb_url" class="card-thumb-img" alt="" loading="lazy"
-                    @error="onThumbError(card)" />
-                  <template v-else>
-                    <div class="card-sun"></div>
-                    <svg class="card-wave" viewBox="0 0 240 90" preserveAspectRatio="none">
-                      <path d="M0,45 C75,20 150,68 240,35 L240,90 L0,90 Z" fill="#94A3B8" opacity="0.45" />
-                      <path d="M0,60 C80,30 160,75 240,48 L240,90 L0,90 Z" fill="#64748B" />
-                    </svg>
-                  </template>
-                </div>
+        <!-- Cards grid shown when photos match -->
+        <div v-else-if="cards.length > 0" class="gallery-cards-grid">
+          <div v-for="(card, i) in displayedPhotos" :key="card.id || i" class="gallery-card">
+            <!-- Thumbnail from the asset server (/thumb/{id}), gradient art as fallback -->
+            <NuxtLink :to="'/gallery/' + card.id" class="card-thumb-link">
+              <div class="card-thumb">
+                <img v-if="card.thumb_url" :src="card.thumb_url" class="card-thumb-img" alt="" loading="lazy"
+                  @error="onThumbError(card)" />
+                <template v-else>
+                  <div class="card-sun"></div>
+                  <svg class="card-wave" viewBox="0 0 240 90" preserveAspectRatio="none">
+                    <path d="M0,45 C75,20 150,68 240,35 L240,90 L0,90 Z" fill="#94A3B8" opacity="0.45" />
+                    <path d="M0,60 C80,30 160,75 240,48 L240,90 L0,90 Z" fill="#64748B" />
+                  </svg>
+                </template>
+              </div>
+            </NuxtLink>
+
+            <!-- Card Body -->
+            <div class="card-body">
+              <!-- Keep the same content position in both search modes. -->
+              <NuxtLink :to="'/gallery/' + card.id" class="card-desc-link">
+                <p class="ai-desc">
+                  {{ card.desc || 'ไม่มีคำอธิบาย' }}
+                </p>
               </NuxtLink>
 
-              <!-- Card Body -->
-              <div class="card-body">
-                <!-- Keep the same content position in both search modes. -->
-                <NuxtLink :to="'/gallery/' + card.id" class="card-desc-link">
-                  <p class="ai-desc">
-                    {{ card.desc || 'ไม่มีคำอธิบาย' }}
-                  </p>
-                </NuxtLink>
-
-                <!-- Tag chips -->
-                <div class="card-tags-row">
-                  <span v-for="t in card.tags" :key="t" class="tag-item" :class="{ highlight: selectedTag === t }"
-                    @click.stop="selectTagByName(t)">
-                    {{ t }}
-                  </span>
-                </div>
+              <!-- Tag chips -->
+              <div class="card-tags-row">
+                <span v-for="t in card.tags" :key="t" class="tag-item" :class="{ highlight: selectedTag === t }"
+                  @click.stop="selectTagByName(t)">
+                  {{ t }}
+                </span>
               </div>
             </div>
-          </template>
-
-          <div v-else class="gallery-card gallery-empty-card">
-            <svg class="empty-image-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
-              aria-hidden="true">
-              <rect x="3" y="4" width="18" height="16" rx="2" />
-              <circle cx="8.5" cy="9" r="1.5" />
-              <path d="m21 15-4.5-4.5L7 20" />
-            </svg>
-            <span>{{ emptyResultMessage }}</span>
           </div>
+        </div>
+
+        <!-- Prominent Empty State when no photos match -->
+        <div v-else class="gallery-empty-state">
+          <div class="empty-icon-wrap">
+            <svg class="empty-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <circle cx="11" cy="11" r="7" />
+              <line x1="21" y1="21" x2="16.5" y2="16.5" stroke-linecap="round" />
+              <line x1="8" y1="11" x2="14" y2="11" stroke-linecap="round" />
+            </svg>
+          </div>
+          <h4 class="empty-title">{{ emptyResultTitle }}</h4>
+          <p class="empty-desc">{{ emptyResultSubtitle }}</p>
+          <button v-if="hasActiveFilter" class="btn-clear-search-filter" @click="clearSearchAndFilter">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+            <span>ล้างการค้นหา / แสดงรูปภาพทั้งหมด</span>
+          </button>
         </div>
 
         <!-- Load more button while more pages are available -->
@@ -286,6 +301,42 @@ const emptyResultMessage = computed(() => {
   }
   return searchQuery.value.trim() ? 'ไม่พบผลการค้นหา' : 'ไม่มีรูปภาพ'
 })
+
+const hasActiveFilter = computed(() => {
+  if (activeTab.value === 'desc') {
+    return !!searchQuery.value.trim()
+  }
+  return !!selectedTag.value
+})
+
+const emptyResultTitle = computed(() => {
+  if (activeTab.value === 'desc' && searchQuery.value.trim()) {
+    return 'ไม่พบรูปภาพที่ค้นหา'
+  }
+  if (activeTab.value === 'tag' && selectedTag.value) {
+    return 'ไม่พบรูปภาพที่มี Tag นี้'
+  }
+  return 'ไม่มีรูปภาพในโฟลเดอร์นี้'
+})
+
+const emptyResultSubtitle = computed(() => {
+  if (activeTab.value === 'desc' && searchQuery.value.trim()) {
+    return `ไม่พบรูปภาพที่ตรงกับ "${searchQuery.value.trim()}" ลองค้นหาด้วยคำอื่น หรือใช้คำที่มีความหมายใกล้เคียง`
+  }
+  if (activeTab.value === 'tag' && selectedTag.value) {
+    return `ไม่มีรูปภาพที่ผูกกับ Tag "${selectedTag.value}" ในโฟลเดอร์ปลายทางปัจจุบัน`
+  }
+  return 'ยังไม่มีรูปภาพที่สำรองไว้ในโฟลเดอร์ปลายทางนี้'
+})
+
+function clearSearchAndFilter() {
+  if (activeTab.value === 'desc') {
+    searchQuery.value = ''
+    search(1, false)
+  } else {
+    clearTag()
+  }
+}
 
 function switchTab(tab: 'desc' | 'tag') {
   if (activeTab.value === tab) return
@@ -1115,6 +1166,78 @@ watch(destPath, async () => {
   line-height: 1.45;
   margin: 0;
   min-height: 36px;
+}
+
+.gallery-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 56px 24px;
+  background: #FFFFFF;
+  border-radius: 16px;
+  border: 1px dashed #CBD5E1;
+  text-align: center;
+  margin: 12px 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.empty-icon-wrap {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #F1F5F9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  color: #64748B;
+}
+
+.empty-search-icon {
+  width: 32px;
+  height: 32px;
+}
+
+.empty-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #1E293B;
+  margin: 0 0 6px 0;
+}
+
+.empty-desc {
+  font-size: 13.5px;
+  color: #64748B;
+  max-width: 440px;
+  line-height: 1.5;
+  margin: 0 0 20px 0;
+}
+
+.btn-clear-search-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: 10px;
+  background: #EEF2FF;
+  color: #4F46E5;
+  border: 1px solid #C7D2FE;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-clear-search-filter:hover {
+  background: #E0E7FF;
+  border-color: #A5B4FC;
+  transform: translateY(-1px);
+}
+
+.text-not-found {
+  color: #EF4444;
+  font-weight: 600;
 }
 
 .gallery-empty-card {

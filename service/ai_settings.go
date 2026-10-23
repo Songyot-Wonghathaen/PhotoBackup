@@ -12,9 +12,10 @@ import (
 	"time"
 
 	"PhotoVault/controller/dto"
+	"PhotoVault/model"
 )
 
-// ConfigurableAiVisionService extends BatchAiVisionService with runtime settings and multi-project API pool management.
+// ConfigurableAiVisionService manages runtime settings and API keys.
 type ConfigurableAiVisionService interface {
 	BatchAiVisionService
 	GetAppSettings() *dto.AppSettingsDTO
@@ -28,13 +29,7 @@ type ConfigurableAiVisionService interface {
 	GetCopyWorkers() int
 }
 
-type persistedAppSettings struct {
-	AutoAnalyze    bool                     `json:"auto_analyze"`
-	PrimaryModel   string                   `json:"primary_model"`
-	DuplicateGuard bool                     `json:"duplicate_guard"`
-	CopyWorkers    int                      `json:"copy_workers"`
-	Projects       []dto.ProjectApiKeyEntry `json:"projects"`
-}
+type persistedAppSettings = model.PersistedAppSettings
 
 func settingsFilePath() string {
 	cwd, err := os.Getwd()
@@ -47,102 +42,49 @@ func settingsFilePath() string {
 	return "database/ai_settings.json"
 }
 
-// ComputeSmartWorkers automatically allocates optimal concurrency workers based on active API key count.
-// - 1 key: 6 workers (distributes across 4 Flash-Lite models + overlap without hitting single-project RPM limit)
-// - 2 keys: 8 workers
-// - 3 keys: 12 workers
-// - 4 keys: 14 workers
-// - 5 keys: 16 workers
-// - 6-7 keys: 18 workers
-// - 8-9 keys: 20 workers
-// - 10+ keys: 24 workers (40+ primary Flash-Lite routes, finishes 1,000 photos in ~10-18s)
+// ComputeSmartWorkers returns worker count based on active API keys.
 func ComputeSmartWorkers(activeKeys int) int {
 	switch {
 	case activeKeys <= 0:
 		return 4
 	case activeKeys == 1:
-		return 6
+		return 4
 	case activeKeys == 2:
-		return 8
+		return 6
 	case activeKeys == 3:
-		return 12
+		return 8
 	case activeKeys == 4:
-		return 14
+		return 10
 	case activeKeys == 5:
-		return 16
+		return 12
 	case activeKeys <= 7:
-		return 18
+		return 14
 	case activeKeys <= 9:
-		return 20
+		return 15
 	default:
-		return 24
+		return 16
 	}
 }
 
 func defaultSeedProjects(envKeys []string) []dto.ProjectApiKeyEntry {
-	type knownMeta struct {
-		name   string
-		number string
-	}
-	known := []knownMeta{
-		{name: "Project 1 (Account 1)", number: "285328992732"},
-		{name: "Project 2 (Account 1)", number: "917843332776"},
-		{name: "Project 3 (Account 1)", number: "335976535875"},
-		{name: "Project 4 (Account 1)", number: "163156631856"},
-		{name: "Project 5 (Account 1)", number: "853499224099"},
-		{name: "project Cross Platform Mobile6", number: "1061737622178"},
-		{name: "project Cross Platform Mobile7", number: "898144085662"},
-		{name: "project Cross Platform Mobile8", number: "1012454347291"},
-		{name: "project Cross Platform Mobile9", number: "369073737348"},
-		{name: "project Cross PlatformMobile10", number: "495572832530"},
+	count := len(envKeys)
+	if count < 10 {
+		count = 10
 	}
 
 	var entries []dto.ProjectApiKeyEntry
-	usedKey := make(map[string]bool)
-
-	for i, km := range known {
+	for i := 0; i < count; i++ {
 		keyVal := ""
-		if i < len(envKeys) && strings.TrimSpace(envKeys[i]) != "" {
+		if i < len(envKeys) {
 			keyVal = strings.TrimSpace(envKeys[i])
-		}
-		if keyVal != "" {
-			usedKey[keyVal] = true
 		}
 		entries = append(entries, dto.ProjectApiKeyEntry{
 			ID:            fmt.Sprintf("proj-%d", i+1),
-			ProjectName:   km.name,
-			ProjectNumber: km.number,
+			ProjectName:   fmt.Sprintf("Project %d", i+1),
+			ProjectNumber: "",
 			ApiKey:        keyVal,
 			Enabled:       keyVal != "",
 		})
-	}
-
-	// Append any extra keys from .env that were not in the first 10 known projects
-	for _, ek := range envKeys {
-		ek = strings.TrimSpace(ek)
-		if ek == "" || usedKey[ek] {
-			continue
-		}
-		usedKey[ek] = true
-		placed := false
-		for idx := range entries {
-			if strings.TrimSpace(entries[idx].ApiKey) == "" {
-				entries[idx].ApiKey = ek
-				entries[idx].Enabled = true
-				placed = true
-				break
-			}
-		}
-		if !placed {
-			n := len(entries) + 1
-			entries = append(entries, dto.ProjectApiKeyEntry{
-				ID:            fmt.Sprintf("proj-%d", n),
-				ProjectName:   fmt.Sprintf("Project %d", n),
-				ProjectNumber: "",
-				ApiKey:        ek,
-				Enabled:       true,
-			})
-		}
 	}
 
 	return entries
@@ -344,7 +286,7 @@ func (s *geminiVisionService) buildSettingsDTOLocked() *dto.AppSettingsDTO {
 		projectsDTO[i] = entry
 	}
 
-	primaryRoutes := activeKeys * 4 // 4 Flash-Lite models per project
+	primaryRoutes := activeKeys * 2 // 2 primary Flash-Lite models per project
 	totalRoutes := activeKeys * len(defaultVisionModels)
 	allocatedWorkers := ComputeSmartWorkers(activeKeys)
 
@@ -359,8 +301,8 @@ func (s *geminiVisionService) buildSettingsDTOLocked() *dto.AppSettingsDTO {
 		TotalRoutes:       totalRoutes,
 		AllocatedWorkers:  allocatedWorkers,
 		BatchSize:         s.BatchSize(),
-		EstimatedRPM:      activeKeys * 60,   // 4 Flash-Lite models * 15 RPM per project
-		EstimatedRPD:      activeKeys * 2000, // 4 Flash-Lite models * 500 RPD per project
+		EstimatedRPM:      activeKeys * 30,   // 2 Flash-Lite models * 15 RPM per project
+		EstimatedRPD:      activeKeys * 1000, // 2 Flash-Lite models * 500 RPD per project
 		Projects:          projectsDTO,
 	}
 }
@@ -404,6 +346,10 @@ func (s *geminiVisionService) SaveProjectApiKey(projectID, projectName, projectN
 
 	if len(keys) == 0 && (projectID == "" || projectID == "new") && projectName == "" && projectNumber == "" {
 		return nil, errors.New("กรุณาระบุ API Key หรือข้อมูลโปรเจกต์")
+	}
+
+	if (projectID == "" || projectID == "new") && len(s.settings.Projects) >= 10 {
+		return nil, errors.New("จำกัดโปรเจกต์สูงสุด 10 โปรเจกต์เท่านั้น (สามารถแก้ไขหรือใส่คีย์ในโปรเจกต์เดิมได้)")
 	}
 
 	// Helper to update or create a single project entry
@@ -463,7 +409,10 @@ func (s *geminiVisionService) SaveProjectApiKey(projectID, projectName, projectN
 			}
 		}
 
-		// 4. Create new project entry
+		// 4. Create new project entry (max 10 projects)
+		if len(s.settings.Projects) >= 10 {
+			return
+		}
 		nextNum := len(s.settings.Projects) + 1
 		newID := fmt.Sprintf("proj-%d-%d", nextNum, time.Now().UnixMilli()%10000)
 		if pName == "" {

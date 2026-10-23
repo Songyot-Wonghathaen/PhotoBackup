@@ -6,12 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"PhotoVault/controller/dto"
 	"PhotoVault/model/model"
 	"PhotoVault/model/query"
 
 	"gorm.io/gen"
 	"gorm.io/gorm"
 )
+
+type TagCount = dto.TagCount
 
 type PhotoRepository interface {
 	GetActivePhotosByDest(ctx context.Context, dest string) ([]*model.Photo, error)
@@ -31,11 +34,6 @@ type PhotoRepository interface {
 	SearchPhotosByDescription(ctx context.Context, dest string, query string, limit int, offset int) ([]*model.Photo, error)
 	SearchPhotosByTag(ctx context.Context, dest string, tagName string, limit int, offset int) ([]*model.Photo, error)
 	GetTagsWithCount(ctx context.Context, dest string) ([]TagCount, error)
-}
-
-type TagCount struct {
-	Name  string
-	Count int
 }
 
 type photoRepository struct {

@@ -34,7 +34,7 @@ jobs:
       - name: Install frontend dependencies & generate static files
         working-directory: ./frontend
         run: |
-          npm ci
+          npm install
           npm run generate
 
       - name: Build Windows Application (.exe)

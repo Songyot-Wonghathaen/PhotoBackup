@@ -291,28 +291,51 @@ export function useBackup() {
     }
   }
 
-  // Feature 6, 7, 8, 9, 11: Move Selected Photos
-  async function moveSelectedPhotos() {
+  // Helper for both Backup (Copy) and Move (Cut)
+  async function executeTransfer(isMove: boolean, isAll: boolean) {
+    const actionName = isMove ? 'ย้าย' : 'สำรอง'
     if (!sourcePath.value) {
-      alert('กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการสำรองไฟล์!')
+      alert(`กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการ${actionName}ไฟล์!`)
       return
     }
     if (!destPath.value) {
-      alert('กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการสำรองไฟล์!')
+      alert(`กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการ${actionName}ไฟล์!`)
       return
     }
-    if (selectedFiles.value.length === 0) {
-      alert('กรุณาเลือกรูปภาพอย่างน้อย 1 ไฟล์ที่ต้องการสำรอง!')
+    if (!isAll && selectedFiles.value.length === 0) {
+      alert(`กรุณาเลือกรูปภาพอย่างน้อย 1 ไฟล์ที่ต้องการ${actionName}!`)
       return
+    }
+    if (isAll && sourceFiles.value.length === 0) {
+      alert(`ไม่พบรูปภาพในโฟลเดอร์ต้นทางที่จะ${actionName}!`)
+      return
+    }
+
+    if (isMove) {
+      const countText = isAll ? `ทั้งหมด ${sourceFiles.value.length}` : `${selectedFiles.value.length}`
+      if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการ "ย้าย" รูปภาพจำนวน ${countText} ไฟล์ไปยังปลายทาง?\n(ไฟล์ต้นทางในโฟลเดอร์ต้นทางจะถูกลบออกหลังจากย้ายสำเร็จ)`)) {
+        return
+      }
     }
 
     isProcessing.value = true
     opStartTime = Date.now()
     try {
-      if (typeof (window as any)?.go?.main?.App?.MovePhotos === 'function') {
-        const summary = await (window as any).go.main.App.MovePhotos(selectedFiles.value, false)
+      const app = (window as any)?.go?.main?.App
+      const targets = isAll ? [] : selectedFiles.value
+      
+      let summary: any = null
+      if (isMove && typeof app?.MovePhotos === 'function') {
+        summary = await app.MovePhotos(targets, isAll)
+      } else if (!isMove && typeof app?.BackupPhotos === 'function') {
+        summary = await app.BackupPhotos(targets, isAll)
+      } else if (typeof app?.MovePhotos === 'function') {
+        summary = await app.MovePhotos(targets, isAll)
+      }
+
+      if (summary) {
         lastSummary.value = {
-          total_files: summary.total_files || selectedFiles.value.length,
+          total_files: summary.total_files || (isAll ? sourceFiles.value.length : selectedFiles.value.length),
           moved_files: summary.moved_files || 0,
           skipped_files: summary.skipped_files || 0,
           failed_files: summary.failed_files || 0,
@@ -320,7 +343,7 @@ export function useBackup() {
           duration_formatted: summary.duration_formatted || `${summary.duration_ms} ms`,
           has_run: true
         }
-        // Kick the AI progress indicator immediately if files were actually moved
+
         if ((summary.moved_files || 0) > 0) {
           isAnalyzing.value = true
           aiProgress.value = { current: 0, total: summary.moved_files || 0, filename: '' }
@@ -328,21 +351,25 @@ export function useBackup() {
         } else {
           stopLiveTimer()
         }
-        aiError.value = null // Clear any previous errors
+        aiError.value = null
+
         await refreshSourceFiles()
-        if (typeof (window as any)?.go?.main?.App?.CheckIntegrity === 'function') {
-          integrityResult.value = await (window as any).go.main.App.CheckIntegrity(destPath.value)
+        if (typeof app?.CheckIntegrity === 'function') {
+          integrityResult.value = await app.CheckIntegrity(destPath.value)
           destCount.value = integrityResult.value?.total_disk || 0
         }
         await fetchDbPhotos()
-        successMessage.value = `สำรองรูปภาพที่เลือกสำเร็จ ${summary.moved_files} ไฟล์ (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`
+
+        const suffix = isMove ? ' (ลบออกจากต้นทางแล้ว)' : ' (เก็บไฟล์ต้นทางไว้)'
+        const scopeText = isAll ? 'ทั้งหมด' : 'ที่เลือก'
+        successMessage.value = `${actionName}รูปภาพ${scopeText}สำเร็จ ${summary.moved_files} ไฟล์${suffix} (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`
         showSuccessModal.value = true
       } else {
         // Browser preview fallback
-        const count = selectedFiles.value.length
+        const count = isAll ? sourceFiles.value.filter(f => !f.is_duplicate).length : selectedFiles.value.length
         destCount.value += count
         lastSummary.value = {
-          total_files: count,
+          total_files: isAll ? sourceFiles.value.length : count,
           moved_files: count,
           skipped_files: 0,
           failed_files: 0,
@@ -350,90 +377,38 @@ export function useBackup() {
           duration_formatted: '18.50 ms',
           has_run: true
         }
-        sourceFiles.value = sourceFiles.value.filter(f => !selectedFiles.value.includes(f.filename))
+        if (isMove) {
+          sourceFiles.value = sourceFiles.value.filter(f => isAll ? f.is_duplicate : !selectedFiles.value.includes(f.filename))
+        }
         selectedFiles.value = []
-        successMessage.value = `จำลองการสำรองไฟล์สำเร็จ ${count} รูป (เวลา ${lastSummary.value.duration_formatted})`
+        successMessage.value = `จำลองการ${actionName}ไฟล์สำเร็จ ${count} รูป (เวลา ${lastSummary.value.duration_formatted})`
         showSuccessModal.value = true
       }
     } catch (err: any) {
       const errorMsg = err?.message || String(err)
       aiError.value = errorMsg
-      alert('เกิดข้อผิดพลาดในการสำรอง: ' + errorMsg)
+      alert(`เกิดข้อผิดพลาดในการ${actionName}: ` + errorMsg)
     } finally {
       isProcessing.value = false
     }
   }
 
-  // Feature 6, 7, 8, 9, 11: Move All Photos
-  async function moveAllPhotos() {
-    if (!sourcePath.value) {
-      alert('กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการสำรองข้อมูล!')
-      return
-    }
-    if (!destPath.value) {
-      alert('กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการสำรองข้อมูล!')
-      return
-    }
-    if (sourceFiles.value.length === 0) {
-      alert('ไม่พบรูปภาพในโฟลเดอร์ต้นทางที่จะสำรอง!')
-      return
-    }
+  // Backup (Copy) actions
+  function backupSelectedPhotos() {
+    return executeTransfer(false, false)
+  }
 
-    isProcessing.value = true
-    opStartTime = Date.now()
-    try {
-      if (typeof (window as any)?.go?.main?.App?.MovePhotos === 'function') {
-        const summary = await (window as any).go.main.App.MovePhotos([], true)
-        lastSummary.value = {
-          total_files: summary.total_files || sourceFiles.value.length,
-          moved_files: summary.moved_files || 0,
-          skipped_files: summary.skipped_files || 0,
-          failed_files: summary.failed_files || 0,
-          duration_ms: summary.duration_ms || 0,
-          duration_formatted: summary.duration_formatted || `${summary.duration_ms} ms`,
-          has_run: true
-        }
-        // Kick the AI progress indicator immediately if files were actually moved
-        if ((summary.moved_files || 0) > 0) {
-          isAnalyzing.value = true
-          aiProgress.value = { current: 0, total: summary.moved_files || 0, filename: '' }
-          startLiveTimer()
-        } else {
-          stopLiveTimer()
-        }
-        aiError.value = null // Clear any previous errors
-        if (typeof (window as any)?.go?.main?.App?.CheckIntegrity === 'function') {
-          integrityResult.value = await (window as any).go.main.App.CheckIntegrity(destPath.value)
-          destCount.value = integrityResult.value?.total_disk || 0
-        }
-        await fetchDbPhotos()
-        successMessage.value = `สำรองรูปภาพทั้งหมดสำเร็จ ${summary.moved_files} ไฟล์ (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`
-        showSuccessModal.value = true
-      } else {
-        // Browser preview fallback
-        const count = sourceFiles.value.filter(f => !f.is_duplicate).length
-        const skipped = sourceFiles.value.filter(f => f.is_duplicate).length
-        destCount.value += count
-        lastSummary.value = {
-          total_files: sourceFiles.value.length,
-          moved_files: count,
-          skipped_files: skipped,
-          failed_files: 0,
-          duration_ms: 32.4,
-          duration_formatted: '32.40 ms',
-          has_run: true
-        }
-        sourceFiles.value = sourceFiles.value.filter(f => f.is_duplicate)
-        selectedFiles.value = []
-        alert(`จำลองการสำรองทั้งหมดสำเร็จ ${count} รูป (ข้ามไฟล์ซ้ำ ${skipped} รูป) เวลา ${lastSummary.value.duration_formatted}`)
-      }
-    } catch (err: any) {
-      const errorMsg = err?.message || String(err)
-      aiError.value = errorMsg
-      alert('เกิดข้อผิดพลาดในการสำรอง: ' + errorMsg)
-    } finally {
-      isProcessing.value = false
-    }
+  function backupAllPhotos() {
+    return executeTransfer(false, true)
+  }
+
+  // Move (Cut/Transfer) actions
+  function moveSelectedPhotos() {
+    return executeTransfer(true, false)
+  }
+
+  function moveAllPhotos() {
+    return executeTransfer(true, true)
   }
 
   // Fetch photos from DB including AI descriptions and tags
@@ -595,6 +570,8 @@ export function useBackup() {
     listDestFiles,
     refreshSourceFiles,
     loadThumbnails,
+    backupSelectedPhotos,
+    backupAllPhotos,
     moveSelectedPhotos,
     moveAllPhotos,
     fetchDbPhotos,

@@ -177,10 +177,14 @@
             {{ allSelected ? 'ยกเลิกการเลือก' : 'เลือกทั้งหมด' }}
           </button>
 
+          <div class="btn-divider"></div>
+
+          <!-- สำรอง (คัดลอกไฟล์ - ไฟล์ต้นทางยังคงอยู่) -->
           <button 
             class="btn-tool btn-primary-light" 
-            @click="handleMoveSelected"
+            @click="handleBackupSelected"
             :disabled="selectedFiles.length === 0 || isProcessing"
+            title="คัดลอกรูปภาพที่เลือกไปยังปลายทาง (เก็บไฟล์ต้นทางไว้)"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -192,8 +196,9 @@
 
           <button 
             class="btn-tool btn-primary-solid" 
-            @click="handleMoveAll"
+            @click="handleBackupAll"
             :disabled="sourceFiles.length === 0 || isProcessing"
+            title="คัดลอกรูปภาพทั้งหมดไปยังปลายทาง (เก็บไฟล์ต้นทางไว้)"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -201,6 +206,35 @@
               <line x1="12" y1="3" x2="12" y2="15"/>
             </svg>
             สำรองทั้งหมด
+          </button>
+
+          <div class="btn-divider"></div>
+
+          <!-- ย้าย (ย้ายไฟล์ - ลบไฟล์ต้นทางออก) -->
+          <button 
+            class="btn-tool btn-amber-light" 
+            @click="handleMoveSelected"
+            :disabled="selectedFiles.length === 0 || isProcessing"
+            title="ย้ายรูปภาพที่เลือกไปยังปลายทาง (ไฟล์ต้นทางจะถูกลบออก)"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12h14"/>
+              <path d="m12 5 7 7-7 7"/>
+            </svg>
+            ย้ายที่เลือก ({{ selectedFiles.length }})
+          </button>
+
+          <button 
+            class="btn-tool btn-amber-solid" 
+            @click="handleMoveAll"
+            :disabled="sourceFiles.length === 0 || isProcessing"
+            title="ย้ายรูปภาพทั้งหมดไปยังปลายทาง (ไฟล์ต้นทางจะถูกลบออก)"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12h14"/>
+              <path d="m12 5 7 7-7 7"/>
+            </svg>
+            ย้ายทั้งหมด
           </button>
         </div>
       </div>
@@ -615,6 +649,8 @@ const {
   handleBrowserFolderUpload,
   selectDestFolder,
   listDestFiles,
+  backupSelectedPhotos,
+  backupAllPhotos,
   moveSelectedPhotos,
   moveAllPhotos,
   initBackupState,
@@ -648,6 +684,14 @@ function handleSelectDest() {
 
 function handleOpenDestList() {
   listDestFiles()
+}
+
+function handleBackupSelected() {
+  backupSelectedPhotos()
+}
+
+function handleBackupAll() {
+  backupAllPhotos()
 }
 
 function handleMoveSelected() {
@@ -1058,6 +1102,35 @@ onMounted(() => {
 
 .btn-primary-solid:hover:not(:disabled) {
   background: #4338CA;
+}
+
+.btn-divider {
+  width: 1px;
+  height: 22px;
+  background-color: #E5E7EB;
+  margin: 0 2px;
+}
+
+.btn-amber-light {
+  background: #FFFBEB;
+  border: 1px solid #FCD34D;
+  color: #D97706;
+}
+
+.btn-amber-light:hover:not(:disabled) {
+  background: #FEF3C7;
+  color: #B45309;
+}
+
+.btn-amber-solid {
+  background: #D97706;
+  border: 1px solid #D97706;
+  color: #FFFFFF;
+  box-shadow: 0 2px 6px rgba(217, 119, 6, 0.25);
+}
+
+.btn-amber-solid:hover:not(:disabled) {
+  background: #B45309;
 }
 
 .btn-tool:disabled {

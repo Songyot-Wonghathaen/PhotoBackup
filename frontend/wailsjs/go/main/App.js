@@ -6,6 +6,10 @@ export function AnalyzePhoto(arg1) {
   return window['go']['main']['App']['AnalyzePhoto'](arg1);
 }
 
+export function BackupPhotos(arg1, arg2) {
+  return window['go']['main']['App']['BackupPhotos'](arg1, arg2);
+}
+
 export function CancelAnalysis() {
   return window['go']['main']['App']['CancelAnalysis']();
 }

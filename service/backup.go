@@ -360,8 +360,17 @@ func (s *BackupService) ListAllDB(destPath string) ([]*modelGen.Photo, error) {
 }
 
 
-// Feature 6, 7, 8, 9, 11: Move with Worker Pool, timer, cross-drive copy, duplicate check, batch insert
+// Backup copies selected or all files to destination (Feature 6: Backup / Copy - preserves source)
+func (s *BackupService) Backup(targets []string, isAll bool) (MoveSummary, error) {
+	return s.processTransfer(targets, isAll, false)
+}
+
+// Move moves selected or all files to destination (Feature 6: Move - removes source)
 func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) {
+	return s.processTransfer(targets, isAll, true)
+}
+
+func (s *BackupService) processTransfer(targets []string, isAll bool, deleteSource bool) (MoveSummary, error) {
 	src := s.GetSource()
 	dst := s.GetDest()
 
@@ -491,7 +500,16 @@ func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) 
 				srcPath := filepath.Join(src, fname)
 				dstPath := filepath.Join(dst, fname)
 
-				shaHash, size, err := streamCopyFile(srcPath, dstPath, buf)
+				var shaHash string
+				var size int64
+				var err error
+
+				if deleteSource {
+					shaHash, size, err = streamMoveFile(srcPath, dstPath, buf)
+				} else {
+					shaHash, size, err = streamCopyFile(srcPath, dstPath, buf)
+				}
+
 				resultChan <- moveResult{
 					filename:  fname,
 					sha256:    shaHash,
@@ -871,6 +889,52 @@ func streamCopyFile(srcPath, dstPath string, buffer []byte) (string, int64, erro
 		_ = os.Remove(dstPath)
 		return "", 0, copyErr
 	}
+
+	return hex.EncodeToString(hasher.Sum(nil)), size, nil
+}
+
+// streamMoveFile implements Feature 6 (Move):
+// Tries os.Rename first. If across drives, fallback to stream copy buffer and remove source file.
+func streamMoveFile(srcPath, dstPath string, buffer []byte) (string, int64, error) {
+	fi, err := os.Stat(srcPath)
+	if err != nil {
+		return "", 0, err
+	}
+	size := fi.Size()
+
+	// Attempt fast Rename first (works on same drive/filesystem)
+	renameErr := os.Rename(srcPath, dstPath)
+	if renameErr == nil {
+		hash := fastFileHash(dstPath)
+		return hash, size, nil
+	}
+
+	// Fallback to cross-drive stream copy buffer and remove source
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return "", 0, err
+	}
+
+	dstFile, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		srcFile.Close()
+		return "", 0, err
+	}
+
+	hasher := sha256.New()
+	writer := io.MultiWriter(dstFile, hasher)
+
+	_, copyErr := io.CopyBuffer(writer, srcFile, buffer)
+	dstFile.Close()
+
+	if copyErr != nil {
+		srcFile.Close()
+		_ = os.Remove(dstPath)
+		return "", 0, copyErr
+	}
+
+	srcFile.Close()
+	_ = os.Remove(srcPath)
 
 	return hex.EncodeToString(hasher.Sum(nil)), size, nil
 }

@@ -95,7 +95,12 @@ func (a *App) CheckIntegrity(destPath string) (service.IntegrityResult, error) {
 	return a.backupService.CheckIntegrity(destPath)
 }
 
-// MovePhotos moves selected files or all files to destination (Feature 6, 7, 8, 9, 11)
+// BackupPhotos copies selected files or all files to destination without removing source (Feature 6: Backup)
+func (a *App) BackupPhotos(targets []string, isAll bool) (service.MoveSummary, error) {
+	return a.backupService.Backup(targets, isAll)
+}
+
+// MovePhotos moves selected files or all files to destination and removes source (Feature 6: Move)
 func (a *App) MovePhotos(targets []string, isAll bool) (service.MoveSummary, error) {
 	return a.backupService.Move(targets, isAll)
 }

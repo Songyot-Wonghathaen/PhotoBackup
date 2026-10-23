@@ -491,7 +491,7 @@ func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) 
 				srcPath := filepath.Join(src, fname)
 				dstPath := filepath.Join(dst, fname)
 
-				shaHash, size, err := streamCopyAndRemoveFile(srcPath, dstPath, buf)
+				shaHash, size, err := streamCopyFile(srcPath, dstPath, buf)
 				resultChan <- moveResult{
 					filename:  fname,
 					sha256:    shaHash,
@@ -841,23 +841,15 @@ func (s *BackupService) analyzeMovedPhotos(ctx context.Context, dst string, phot
 	log.Printf("[AI-Vision] วิเคราะห์เสร็จสิ้น %d รูป ใช้เวลาทั้งหมด %v", totalPhotos, time.Since(startAnalyze))
 }
 
-// streamCopyAndRemoveFile implements Feature 6:
-// Tries os.Rename first. If across drives, fallback to stream copy buffer and delete source.
-func streamCopyAndRemoveFile(srcPath, dstPath string, buffer []byte) (string, int64, error) {
+// streamCopyFile streams the file content to destination and computes SHA-256 simultaneously,
+// preserving the original source file (Copy instead of Move).
+func streamCopyFile(srcPath, dstPath string, buffer []byte) (string, int64, error) {
 	fi, err := os.Stat(srcPath)
 	if err != nil {
 		return "", 0, err
 	}
 	size := fi.Size()
 
-	// Attempt fast Rename first
-	renameErr := os.Rename(srcPath, dstPath)
-	if renameErr == nil {
-		hash := fastFileHash(dstPath)
-		return hash, size, nil
-	}
-
-	// Fallback to cross-drive stream copy buffer
 	srcFile, err := os.Open(srcPath)
 	if err != nil {
 		return "", 0, err
@@ -868,20 +860,17 @@ func streamCopyAndRemoveFile(srcPath, dstPath string, buffer []byte) (string, in
 	if err != nil {
 		return "", 0, err
 	}
+	defer dstFile.Close()
 
 	hasher := sha256.New()
 	writer := io.MultiWriter(dstFile, hasher)
 
 	_, copyErr := io.CopyBuffer(writer, srcFile, buffer)
-	dstFile.Close()
-
 	if copyErr != nil {
+		dstFile.Close()
 		_ = os.Remove(dstPath)
 		return "", 0, copyErr
 	}
-
-	srcFile.Close()
-	_ = os.Remove(srcPath)
 
 	return hex.EncodeToString(hasher.Sum(nil)), size, nil
 }

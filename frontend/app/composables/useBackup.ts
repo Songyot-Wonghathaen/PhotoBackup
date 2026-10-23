@@ -294,15 +294,15 @@ export function useBackup() {
   // Feature 6, 7, 8, 9, 11: Move Selected Photos
   async function moveSelectedPhotos() {
     if (!sourcePath.value) {
-      alert('กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการย้ายไฟล์!')
+      alert('กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการสำรองไฟล์!')
       return
     }
     if (!destPath.value) {
-      alert('กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการย้ายไฟล์!')
+      alert('กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการสำรองไฟล์!')
       return
     }
     if (selectedFiles.value.length === 0) {
-      alert('กรุณาเลือกรูปภาพอย่างน้อย 1 ไฟล์ที่ต้องการย้าย!')
+      alert('กรุณาเลือกรูปภาพอย่างน้อย 1 ไฟล์ที่ต้องการสำรอง!')
       return
     }
 
@@ -352,13 +352,13 @@ export function useBackup() {
         }
         sourceFiles.value = sourceFiles.value.filter(f => !selectedFiles.value.includes(f.filename))
         selectedFiles.value = []
-        successMessage.value = `จำลองการย้ายไฟล์สำเร็จ ${count} รูป (เวลา ${lastSummary.value.duration_formatted})`
+        successMessage.value = `จำลองการสำรองไฟล์สำเร็จ ${count} รูป (เวลา ${lastSummary.value.duration_formatted})`
         showSuccessModal.value = true
       }
     } catch (err: any) {
       const errorMsg = err?.message || String(err)
       aiError.value = errorMsg
-      alert('เกิดข้อผิดพลาดในการย้าย: ' + errorMsg)
+      alert('เกิดข้อผิดพลาดในการสำรอง: ' + errorMsg)
     } finally {
       isProcessing.value = false
     }
@@ -430,7 +430,7 @@ export function useBackup() {
     } catch (err: any) {
       const errorMsg = err?.message || String(err)
       aiError.value = errorMsg
-      alert('เกิดข้อผิดพลาดในการย้าย: ' + errorMsg)
+      alert('เกิดข้อผิดพลาดในการสำรอง: ' + errorMsg)
     } finally {
       isProcessing.value = false
     }

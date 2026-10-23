@@ -257,7 +257,7 @@
         <div class="setting-row">
           <div class="setting-info">
             <span class="setting-name">วิเคราะห์ภาพอัตโนมัติ</span>
-            <span class="setting-desc">สร้างคำอธิบายและแท็กทันทีหลังย้ายรูปเสร็จ</span>
+            <span class="setting-desc">สร้างคำอธิบายและแท็กทันทีหลังสำรองรูปเสร็จ</span>
           </div>
           <div class="setting-control">
             <label class="toggle-switch">

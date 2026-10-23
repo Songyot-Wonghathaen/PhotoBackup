@@ -5,7 +5,7 @@
     <header class="view-header">
       <div class="header-text">
         <h1 class="view-title">สำรองรูปภาพ</h1>
-        <p class="view-subtitle">ย้ายรูปจาก Flash Drive / โทรศัพท์ ไปยังเครื่อง พร้อมให้ AI วิเคราะห์คำอธิบายและ Tag</p>
+        <p class="view-subtitle">สำรองรูปจาก Flash Drive / โทรศัพท์ ไปยังเครื่อง พร้อมให้ AI วิเคราะห์คำอธิบายและ Tag</p>
       </div>
 
       <!-- Missing files badge in header if any -->
@@ -187,7 +187,7 @@
               <polyline points="17 8 12 3 7 8"/>
               <line x1="12" y1="3" x2="12" y2="15"/>
             </svg>
-            ย้ายที่เลือก ({{ selectedFiles.length }})
+            สำรองที่เลือก ({{ selectedFiles.length }})
           </button>
 
           <button 
@@ -283,7 +283,7 @@
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
             <polyline points="20 6 9 17 4 12"/>
           </svg>
-          ย้ายสำเร็จ {{ lastSummary.moved_files }}
+          สำรองสำเร็จ {{ lastSummary.moved_files }}
         </span>
         <span class="status-pill pill-warning">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -348,7 +348,7 @@
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
             <polyline points="20 6 9 17 4 12"/>
           </svg>
-          ย้ายสำเร็จ {{ lastSummary.moved_files }}
+          สำรองสำเร็จ {{ lastSummary.moved_files }}
         </span>
         <span class="status-pill pill-warning">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">

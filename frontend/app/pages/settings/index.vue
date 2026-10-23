@@ -3,9 +3,9 @@
     <!-- Header -->
     <header class="view-header">
       <div class="header-text">
-        <h1 class="view-title">ตั้งค่าระบบและจัดการ API Projects</h1>
+        <h1 class="view-title">ตั้งค่า</h1>
         <p class="view-subtitle">
-          จัดการโปรเจกต์ Gemini API Keys, ระบบจัดสรรเส้นทางวิเคราะห์อัตโนมัติ และการสำรองข้อมูล (บันทึกถาวรใช้งานได้ทันทีแม้ Build เป็นไฟล์ .exe)
+          จัดการ API Keys และตั้งค่าการทำงานของระบบ
         </p>
       </div>
       <div class="header-actions">
@@ -16,7 +16,7 @@
             <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
             <path d="M16 21h5v-5"/>
           </svg>
-          รีเซ็ตสถานะโควตา AI
+          รีเซ็ตโควตา AI
         </button>
       </div>
     </header>
@@ -28,7 +28,7 @@
     </div>
 
     <div class="settings-container">
-      <!-- Smart Route & Concurrency Allocator Summary Card -->
+      <!-- Summary Card -->
       <div class="settings-card allocator-card">
         <div class="card-header-flex">
           <h3 class="card-title">
@@ -36,26 +36,26 @@
               <circle cx="12" cy="12" r="3"/>
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
             </svg>
-            ระบบจัดสรรเส้นทางและ Worker อัตโนมัติ (Smart Route Allocator)
+            สถานะการเชื่อมต่อ AI
           </h3>
           <span class="tier-pill">{{ allocationTierLabel }}</span>
         </div>
 
         <div class="metrics-grid">
           <div class="metric-box">
-            <span class="metric-label">โปรเจกต์ที่พร้อมใช้งาน</span>
-            <span class="metric-value">{{ settings.active_key_count }} <small>/ {{ settings.total_project_count }} โปรเจกต์</small></span>
+            <span class="metric-label">โปรเจกต์ที่เปิดใช้</span>
+            <span class="metric-value">{{ settings.active_key_count }} <small>/ {{ settings.total_project_count }}</small></span>
           </div>
           <div class="metric-box">
-            <span class="metric-label">เส้นทางความเร็วสูง (Flash-Lite)</span>
-            <span class="metric-value">{{ settings.primary_routes }} <small>เส้นทางหลัก (รวม {{ settings.total_routes }})</small></span>
+            <span class="metric-label">เส้นทางที่ใช้งาน</span>
+            <span class="metric-value">{{ settings.primary_routes }} <small>เส้นทาง</small></span>
           </div>
           <div class="metric-box">
-            <span class="metric-label">AI Workers ขนานอัตโนมัติ</span>
-            <span class="metric-value">{{ settings.allocated_workers }} <small>Workers ({{ settings.batch_size }} รูป/Batch)</small></span>
+            <span class="metric-label">จำนวน Workers</span>
+            <span class="metric-value">{{ settings.allocated_workers }} <small>Workers ({{ settings.batch_size }} รูป/รอบ)</small></span>
           </div>
           <div class="metric-box">
-            <span class="metric-label">โควตารวมโดยประมาณ</span>
+            <span class="metric-label">โควตารวม</span>
             <span class="metric-value">{{ settings.estimated_rpm }} <small>RPM | {{ settings.estimated_rpd.toLocaleString() }} RPD</small></span>
           </div>
         </div>
@@ -72,7 +72,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
             </svg>
-            จัดการ Google Cloud Projects & Gemini API Keys
+            จัดการโปรเจกต์และ API Keys
           </h3>
         </div>
 
@@ -82,13 +82,15 @@
             :class="['mode-tab', { active: formMode === 'existing' }]"
             @click="switchMode('existing')"
           >
-            เลือกโปรเจกต์เดิม + ใส่/เปลี่ยน API Key ใหม่
+            แก้ไขโปรเจกต์เดิม
           </button>
           <button
             :class="['mode-tab', { active: formMode === 'new' }]"
+            :disabled="settings.projects.length >= 10"
+            :title="settings.projects.length >= 10 ? 'จำกัดสูงสุด 10 โปรเจกต์ (ครบแล้ว)' : 'เพิ่มโปรเจกต์ใหม่'"
             @click="switchMode('new')"
           >
-            เพิ่มโปรเจกต์ใหม่ + API Key ใหม่
+            เพิ่มโปรเจกต์ใหม่ {{ settings.projects.length >= 10 ? '(ครบ 10 แล้ว)' : '' }}
           </button>
         </div>
 
@@ -96,16 +98,16 @@
         <div class="api-form-box">
           <div v-if="formMode === 'existing'" class="form-grid">
             <div class="form-group">
-              <label class="form-label">เลือกโปรเจกต์เดิมที่มีอยู่</label>
+              <label class="form-label">โปรเจกต์</label>
               <select v-model="selectedProjectId" class="input-control" @change="onSelectExistingProject">
                 <option v-for="proj in settings.projects" :key="proj.id" :value="proj.id">
                   {{ proj.project_name }} {{ proj.project_number ? `(${proj.project_number})` : '' }}
-                  — {{ proj.api_key ? 'มีคีย์แล้ว (พร้อมเปลี่ยน)' : 'ยังไม่มี API Key' }}
+                  — {{ proj.api_key ? 'มีคีย์แล้ว' : 'ยังไม่มีคีย์' }}
                 </option>
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">หมายเลข Project Number (แก้ไขได้ถ้าต้องการ)</label>
+              <label class="form-label">Project Number</label>
               <input
                 v-model="formProjectNumber"
                 type="text"
@@ -117,16 +119,16 @@
 
           <div v-else class="form-grid">
             <div class="form-group">
-              <label class="form-label">ชื่อโปรเจกต์ใหม่ (เว้นว่างให้ระบบตั้งอัตโนมัติได้)</label>
+              <label class="form-label">ชื่อโปรเจกต์ (ไม่บังคับ)</label>
               <input
                 v-model="formProjectName"
                 type="text"
                 class="input-control"
-                placeholder="เช่น Project 11 หรือ Account 2 - Project 6"
+                placeholder="เช่น Project 11"
               />
             </div>
             <div class="form-group">
-              <label class="form-label">หมายเลข Project Number (เว้นว่างได้)</label>
+              <label class="form-label">Project Number (ไม่บังคับ)</label>
               <input
                 v-model="formProjectNumber"
                 type="text"
@@ -138,18 +140,18 @@
 
           <div class="form-group full-width">
             <label class="form-label">
-              Gemini API Key
-              <span class="label-hint">(ใส่ 1 คีย์ หรือวางหลายคีย์พร้อมกันคั่นด้วยบรรทัดใหม่/ลูกน้ำ ระบบจะกระจายลงโปรเจกต์ให้อัตโนมัติ)</span>
+              API Key
+              <span class="label-hint">(วางได้หลายคีย์พร้อมกัน คั่นด้วยลูกน้ำหรือขึ้นบรรทัดใหม่)</span>
             </label>
             <div class="key-input-row">
               <textarea
                 v-model="formApiKey"
                 rows="2"
                 class="input-control textarea-key"
-                placeholder="วาง API Key ที่นี่ เช่น AQ.Ab8RN6... หรือ AIzaSy..."
+                placeholder="AQ.Ab8RN6... หรือ AIzaSy..."
               ></textarea>
               <button class="btn-primary btn-save-key" @click="handleSaveProjectKey" :disabled="isSaving">
-                {{ formMode === 'existing' ? 'บันทึกคีย์ลงโปรเจกต์นี้' : 'เพิ่มโปรเจกต์และบันทึกคีย์' }}
+                {{ formMode === 'existing' ? 'บันทึกคีย์' : 'เพิ่มโปรเจกต์' }}
               </button>
             </div>
           </div>
@@ -157,9 +159,9 @@
 
         <!-- Project Pool List -->
         <div class="project-list-header">
-          <span>รายการโปรเจกต์ทั้งหมด ({{ settings.projects.length }} โปรเจกต์)</span>
+          <span>โปรเจกต์ทั้งหมด ({{ settings.projects.length }})</span>
           <button class="btn-text" @click="showAllKeys = !showAllKeys">
-            {{ showAllKeys ? 'ซ่อนตัวคีย์ทั้งหมด' : 'แสดงตัวคีย์ทั้งหมด' }}
+            {{ showAllKeys ? 'ซ่อนคีย์' : 'แสดงคีย์ทั้งหมด' }}
           </button>
         </div>
 
@@ -168,7 +170,7 @@
             <thead>
               <tr>
                 <th style="width: 46px;">#</th>
-                <th>ชื่อโปรเจกต์ / Project Number</th>
+                <th>โปรเจกต์</th>
                 <th>API Key</th>
                 <th style="width: 150px;">สถานะ</th>
                 <th style="width: 190px; text-align: right;">จัดการ</th>
@@ -179,7 +181,7 @@
                 <td class="col-idx">{{ idx + 1 }}</td>
                 <td>
                   <div class="proj-name">{{ proj.project_name }}</div>
-                  <div class="proj-num" v-if="proj.project_number">Project Number: {{ proj.project_number }}</div>
+                  <div class="proj-num" v-if="proj.project_number">{{ proj.project_number }}</div>
                 </td>
                 <td class="col-key">
                   <div v-if="inlineEditId === proj.id" class="inline-edit-row">
@@ -197,7 +199,7 @@
                     <code v-if="proj.api_key" class="key-code">
                       {{ showAllKeys ? proj.api_key : maskApiKey(proj.api_key) }}
                     </code>
-                    <span v-else class="missing-key-text">ยังไม่ได้ระบุ API Key</span>
+                    <span v-else class="missing-key-text">ยังไม่มีคีย์</span>
                   </div>
                 </td>
                 <td>
@@ -209,11 +211,11 @@
                   <button
                     class="btn-xs btn-outline"
                     @click="startInlineEdit(proj)"
-                    title="ใส่หรือเปลี่ยน API Key ของโปรเจกต์นี้"
+                    title="แก้ไข API Key"
                   >
                     {{ proj.api_key ? 'เปลี่ยนคีย์' : 'ใส่คีย์' }}
                   </button>
-                  <label class="toggle-switch toggle-sm" :title="proj.enabled ? 'คลิกเพื่อพักใช้งานโปรเจกต์นี้' : 'คลิกเพื่อเปิดใช้งาน'">
+                  <label class="toggle-switch toggle-sm" :title="proj.enabled ? 'ปิดใช้งาน' : 'เปิดใช้งาน'">
                     <input
                       type="checkbox"
                       :checked="proj.enabled"
@@ -225,7 +227,7 @@
                   <button
                     class="btn-xs btn-danger-ghost"
                     @click="handleDeleteProject(proj)"
-                    title="ลบโปรเจกต์นี้ออกจากรายการ"
+                    title="ลบโปรเจกต์"
                   >
                     ลบ
                   </button>
@@ -233,7 +235,7 @@
               </tr>
               <tr v-if="settings.projects.length === 0">
                 <td colspan="5" class="empty-row">
-                  ยังไม่มีโปรเจกต์ในระบบ กรุณาเพิ่มโปรเจกต์และ API Key ด้านบน
+                  ยังไม่มีโปรเจกต์ในระบบ
                 </td>
               </tr>
             </tbody>
@@ -249,13 +251,13 @@
             <line x1="8" y1="21" x2="16" y2="21"/>
             <line x1="12" y1="17" x2="12" y2="21"/>
           </svg>
-          การตั้งค่าระบบวิเคราะห์ภาพ AI และระบบสำรองข้อมูล
+          ตั้งค่าทั่วไป
         </h3>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-name">วิเคราะห์ภาพอัตโนมัติหลังสำรองข้อมูล</span>
-            <span class="setting-desc">ส่งรูปภาพไปสร้างคำอธิบายและ Tags ทันทีที่ย้ายไฟล์ลงปลายทางเสร็จสิ้น</span>
+            <span class="setting-name">วิเคราะห์ภาพอัตโนมัติ</span>
+            <span class="setting-desc">สร้างคำอธิบายและแท็กทันทีหลังย้ายรูปเสร็จ</span>
           </div>
           <div class="setting-control">
             <label class="toggle-switch">
@@ -271,8 +273,8 @@
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-name">ลำดับความสำคัญของโมเดล AI (Model Priority Strategy)</span>
-            <span class="setting-desc">ระบบจะเลือกใช้โมเดลความเร็วสูงและสลับอัตโนมัติเมื่อติดลิมิต</span>
+            <span class="setting-name">โมเดล AI</span>
+            <span class="setting-desc">เลือกโมเดลหลักสำหรับวิเคราะห์รูปภาพ</span>
           </div>
           <div class="setting-control">
             <select
@@ -280,18 +282,18 @@
               class="select-box"
               @change="handleSaveSystemSettings"
             >
-              <option value="auto">Auto Multi-Model (Flash-Lite Priority - แนะนำ)</option>
-              <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite (500 RPD / 15 RPM)</option>
-              <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (500 RPD / 15 RPM)</option>
-              <option value="gemini-3.8-flash">Gemini 3.8 Flash (ความละเอียดสูง)</option>
+              <option value="auto">อัตโนมัติ (แนะนำ)</option>
+              <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash-Lite</option>
+              <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite</option>
+              <option value="gemini-3.8-flash">Gemini 3.8 Flash</option>
             </select>
           </div>
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-name">ตรวจสอบความปลอดภัยไฟล์ซ้ำ (Duplicate Guard SHA256)</span>
-            <span class="setting-desc">ป้องกันการสำรองรูปซ้ำโดยตรวจสอบทั้งชื่อไฟล์ในดิสก์และค่า Hash SHA256 ในฐานข้อมูล</span>
+            <span class="setting-name">ป้องกันไฟล์ซ้ำ</span>
+            <span class="setting-desc">ข้ามไฟล์ที่มีชื่อหรือค่า SHA256 ซ้ำกับที่มีอยู่แล้ว</span>
           </div>
           <div class="setting-control">
             <label class="toggle-switch">
@@ -307,8 +309,8 @@
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-name">ความเร็วการคัดลอกไฟล์ (File Copy Worker Pool)</span>
-            <span class="setting-desc">จำนวน Goroutines สำหรับคัดลอกรูปภาพขนานพร้อมกัน (Stream Buffer 128 KB)</span>
+            <span class="setting-name">จำนวน Worker คัดลอกไฟล์</span>
+            <span class="setting-desc">จำนวนงานคัดลอกไฟล์พร้อมกัน</span>
           </div>
           <div class="setting-control">
             <select
@@ -316,22 +318,22 @@
               class="select-box"
               @change="handleSaveSystemSettings"
             >
-              <option :value="4">4 Workers (ประหยัดพลังงาน)</option>
-              <option :value="8">8 Workers (มาตรฐาน)</option>
-              <option :value="16">16 Workers (ความเร็วสูง - แนะนำ)</option>
-              <option :value="24">24 Workers (ความเร็วสูงสุด SSD/NVMe)</option>
-              <option :value="32">32 Workers (Extreme SSD)</option>
+              <option :value="4">4 Workers</option>
+              <option :value="8">8 Workers</option>
+              <option :value="16">16 Workers (แนะนำ)</option>
+              <option :value="24">24 Workers</option>
+              <option :value="32">32 Workers</option>
             </select>
           </div>
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-name">ฐานข้อมูล SQLite WAL Mode & Batch Insert</span>
-            <span class="setting-desc">Write-Ahead Logging เปิดใช้งานถาวร พร้อมระบบเขียนข้อมูลแบบ Batch (1,000 แถว/รอบ)</span>
+            <span class="setting-name">ฐานข้อมูล SQLite</span>
+            <span class="setting-desc">บันทึกข้อมูลแบบ WAL Mode</span>
           </div>
           <div class="setting-control">
-            <span class="status-pill pill-active">เปิดใช้งาน (WAL Mode)</span>
+            <span class="status-pill pill-active">ปกติ</span>
           </div>
         </div>
       </div>
@@ -414,11 +416,8 @@ function showStatus(msg: string, type: 'success' | 'error' = 'success') {
 
 const allocationTierLabel = computed(() => {
   const k = settings.value.active_key_count
-  if (k <= 0) return 'ยังไม่มี API Key ที่เปิดใช้งาน'
-  if (k === 1) return 'โหมด 1 โปรเจกต์ (Single-Project Smart Pool)'
-  if (k <= 4) return `โหมดหลายโปรเจกต์ (${k} Projects Pool)`
-  if (k <= 9) return `โหมดความเร็วสูง (${k} Projects High-Speed Pool)`
-  return `โหมดความเร็วสูงสุด (${k} Projects Ultra-Speed Pool)`
+  if (k <= 0) return 'ยังไม่เปิดใช้งาน'
+  return `เปิดใช้ ${k} โปรเจกต์`
 })
 
 const allocationDescription = computed(() => {
@@ -426,15 +425,9 @@ const allocationDescription = computed(() => {
   const w = settings.value.allocated_workers
   const r = settings.value.primary_routes
   if (k <= 0) {
-    return 'กรุณาเพิ่มหรือเปิดใช้งาน API Key อย่างน้อย 1 โปรเจกต์ เพื่อให้ระบบเริ่มจัดสรรเส้นทางวิเคราะห์อัตโนมัติ'
+    return 'กรุณาเพิ่ม API Key อย่างน้อย 1 โปรเจกต์เพื่อเริ่มใช้งาน'
   }
-  if (k === 1) {
-    return `ตรวจพบ 1 API Key: ระบบจัดสรร ${r} เส้นทางหลักจากโมเดลตระกูล Flash-Lite และกำหนดความเร็วที่ ${w} Workers ขนาน เพื่อป้องกันการชน Rate Limit ของโปรเจกต์เดียว`
-  }
-  if (k < 10) {
-    return `ตรวจพบ ${k} API Keys: ระบบขยายเส้นทางอัตโนมัติเป็น ${r} เส้นทางหลัก (รวมสำรอง ${settings.value.total_routes} เส้นทาง) และเปิด ${w} Workers ขนาน กระจายโหลดข้ามโปรเจกต์ไม่ให้ชนโควตา`
-  }
-  return `ตรวจพบ ${k} API Keys เต็มอัตรา: ระบบเปิด ${r} เส้นทางความเร็วสูง และจัดสรร ${w} Workers ขนาน ทำให้การวิเคราะห์ 1,000 รูป (40 Batches) มีเส้นทางอิสระแยกกันทุก Batch ใช้เวลาเพียงประมาณ 10–18 วินาที`
+  return `เปิดใช้งาน ${k} คีย์ (${r} เส้นทาง, ${w} Workers)`
 })
 
 function applySettingsResponse(res: AppSettingsDTO | null | undefined) {
@@ -512,7 +505,7 @@ async function handleSaveProjectKey() {
       formProjectNumber.value = ''
     }
 
-    showStatus(`บันทึกสำเร็จ: ระบบจัดสรร ${res.primary_routes} เส้นทางหลัก (${res.allocated_workers} Workers ขนาน) ทันที`)
+    showStatus('บันทึก API Key เรียบร้อยแล้ว')
   } catch (err: any) {
     showStatus(err?.message || String(err), 'error')
   } finally {
@@ -541,7 +534,7 @@ async function saveInlineKey(proj: ProjectApiKeyEntry) {
     applySettingsResponse(res)
     inlineEditId.value = ''
     inlineApiKey.value = ''
-    showStatus(`อัปเดตคีย์สำหรับ ${proj.project_name} เรียบร้อยแล้ว (${res.active_key_count} โปรเจกต์พร้อมใช้งาน)`)
+    showStatus(`อัปเดตคีย์ ${proj.project_name} เรียบร้อยแล้ว`)
   } catch (err: any) {
     showStatus(err?.message || String(err), 'error')
   } finally {
@@ -556,14 +549,14 @@ async function handleToggleProject(proj: ProjectApiKeyEntry) {
   try {
     const res = await bridge.ToggleProjectApiKey(proj.id, !proj.enabled)
     applySettingsResponse(res)
-    showStatus(`ปรับสถานะ ${proj.project_name} สำเร็จ: จัดสรรใหม่เป็น ${res.allocated_workers} Workers (${res.primary_routes} เส้นทาง)`)
+    showStatus(`อัปเดตสถานะ ${proj.project_name} เรียบร้อยแล้ว`)
   } catch (err: any) {
     showStatus(err?.message || String(err), 'error')
   }
 }
 
 async function handleDeleteProject(proj: ProjectApiKeyEntry) {
-  if (!confirm(`คุณต้องการลบ "${proj.project_name}" ออกจากรายการใช่หรือไม่?`)) return
+  if (!confirm(`ต้องการลบ "${proj.project_name}" ใช่หรือไม่?`)) return
 
   const bridge = getBackendBridge()
   if (!bridge || typeof bridge.DeleteProjectApiKey !== 'function') return
@@ -571,7 +564,7 @@ async function handleDeleteProject(proj: ProjectApiKeyEntry) {
   try {
     const res = await bridge.DeleteProjectApiKey(proj.id)
     applySettingsResponse(res)
-    showStatus(`ลบโปรเจกต์ ${proj.project_name} เรียบร้อยแล้ว`)
+    showStatus(`ลบ ${proj.project_name} เรียบร้อยแล้ว`)
   } catch (err: any) {
     showStatus(err?.message || String(err), 'error')
   }
@@ -589,7 +582,7 @@ async function handleSaveSystemSettings() {
       Number(settings.value.copy_workers) || 16
     )
     applySettingsResponse(res)
-    showStatus('บันทึกการตั้งค่าระบบเรียบร้อยแล้ว')
+    showStatus('บันทึกการตั้งค่าแล้ว')
   } catch (err: any) {
     showStatus(err?.message || String(err), 'error')
   }
@@ -603,7 +596,7 @@ async function handleResetCooldowns() {
   try {
     const res = await bridge.ResetAiQuotaCooldowns()
     applySettingsResponse(res)
-    showStatus('รีเซ็ตสถานะพักโควตา (Cooldown) ของทุกโปรเจกต์และโมเดลเรียบร้อยแล้ว')
+    showStatus('รีเซ็ตโควตาเรียบร้อยแล้ว')
   } catch (err: any) {
     showStatus(err?.message || String(err), 'error')
   } finally {

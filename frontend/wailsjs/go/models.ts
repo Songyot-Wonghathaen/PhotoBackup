@@ -303,6 +303,20 @@ export namespace dto {
 		    return a;
 		}
 	}
+	export class TagCount {
+	    name: string;
+	    count: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new TagCount(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.count = source["count"];
+	    }
+	}
 	
 	export class VisionResult {
 	    description: string;
@@ -425,25 +439,6 @@ export namespace model {
 		}
 	}
 	
-
-}
-
-export namespace repository {
-	
-	export class TagCount {
-	    Name: string;
-	    Count: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new TagCount(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Name = source["Name"];
-	        this.Count = source["Count"];
-	    }
-	}
 
 }
 

@@ -263,14 +263,14 @@ func TestListModels(t *testing.T) {
 }
 
 func TestSmartProjectAllocation(t *testing.T) {
-	if got := ComputeSmartWorkers(1); got != 6 {
-		t.Fatalf("expected 6 workers for 1 key, got %d", got)
+	if got := ComputeSmartWorkers(1); got != 4 {
+		t.Fatalf("expected 4 workers for 1 key, got %d", got)
 	}
-	if got := ComputeSmartWorkers(5); got != 16 {
-		t.Fatalf("expected 16 workers for 5 keys, got %d", got)
+	if got := ComputeSmartWorkers(5); got != 12 {
+		t.Fatalf("expected 12 workers for 5 keys, got %d", got)
 	}
-	if got := ComputeSmartWorkers(10); got != 24 {
-		t.Fatalf("expected 24 workers for 10 keys, got %d", got)
+	if got := ComputeSmartWorkers(10); got != 16 {
+		t.Fatalf("expected 16 workers for 10 keys, got %d", got)
 	}
 
 	keys := extractApiKeysFromInput("AQ.Ab8RN6KeyOne12345, AQ.Ab8RN6KeyTwo67890")

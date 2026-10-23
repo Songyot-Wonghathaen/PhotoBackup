@@ -24,12 +24,22 @@ import (
 	"time"
 
 	"PhotoVault/controller/dto"
+	"PhotoVault/model"
 	"PhotoVault/utils"
 
 	"github.com/joho/godotenv"
 )
 
 type VisionResult = dto.VisionResult
+type modelQuotaRecord = model.ModelQuotaRecord
+type modelQuotaCacheFile = model.ModelQuotaCacheFile
+type batchItemWire = model.BatchItemWire
+type geminiRequest = model.GeminiRequest
+type geminiResponse = model.GeminiResponse
+type geminiContent = model.GeminiContent
+type geminiPart = model.GeminiPart
+type geminiInlineData = model.GeminiInlineData
+type geminiGenerationConfig = model.GeminiGenerationConfig
 
 type AiVisionService interface {
 	AnalyzePhoto(ctx context.Context, filePath string) (*VisionResult, error)
@@ -37,8 +47,7 @@ type AiVisionService interface {
 	ExpandSearchQuery(ctx context.Context, query string) ([]string, error)
 }
 
-// BatchAiVisionService is an optional extension implemented by geminiVisionService
-// to analyze multiple photos in a single grid collage request at ultra-high speed.
+// BatchAiVisionService analyzes multiple photos per request.
 type BatchAiVisionService interface {
 	AiVisionService
 	AnalyzePhotoBatch(ctx context.Context, filePaths []string) ([]*VisionResult, error)
@@ -47,49 +56,38 @@ type BatchAiVisionService interface {
 	BatchSize() int
 }
 
-// Distinct underlying model buckets on Google v1beta API (zero alias overlap):
-// - gemini-3.5-flash-lite (500 RPD, 15 RPM)
-// - gemini-3.1-flash-lite (500 RPD, 15 RPM)
-// - gemma-4-26b-a4b-it    (14,400 RPD, 30 RPM - high-quota multimodal MoE overflow)
-// - gemini-3-flash-preview (20 RPD, 5 RPM)
-// - gemini-3.8-flash       (20 RPD, 5 RPM)
-// - gemini-3.6-flash       (20 RPD, 5 RPM)
 var defaultVisionModels = []string{
 	"gemini-3.5-flash-lite",
 	"gemini-3.1-flash-lite",
-	"gemma-4-26b-a4b-it",
 	"gemini-3-flash-preview",
 	"gemini-3.8-flash",
 	"gemini-3.6-flash",
 }
 
-type modelQuotaRecord struct {
-	Model     string `json:"model"`
-	KeyPrefix string `json:"key_prefix"`
-	Reason    string `json:"reason"`
-	ResetAt   string `json:"reset_at"` // RFC3339
-}
-
-type modelQuotaCacheFile struct {
-	Records map[string]modelQuotaRecord `json:"records"` // keyPrefix|model -> record
+func isPrimaryFlashLiteModel(model string) bool {
+	return strings.Contains(strings.ToLower(model), "flash-lite")
 }
 
 type geminiVisionService struct {
-	apiKey       string
-	apiKeys      []string
-	httpClient   *http.Client
-	modelName    string
-	models       []string
-	counter      uint64
-	cooldownMu   sync.RWMutex
-	cooldowns    map[string]time.Time
-	lastUsed     map[string]time.Time
-	inFlight     map[string]int
-	lastRateLog  map[string]time.Time
-	cachePath    string
-	collageCache sync.Map
-	settingsMu   sync.RWMutex
-	settings     *persistedAppSettings
+	apiKey           string
+	apiKeys          []string
+	httpClient       *http.Client
+	modelName        string
+	models           []string
+	counter          uint64
+	cooldownMu       sync.RWMutex
+	cooldowns        map[string]time.Time
+	lastUsed         map[string]time.Time
+	lastKeyUsed      map[string]time.Time
+	sharedKeyBucket  map[string]bool
+	lastGlobalSlot   time.Time
+	smoothBurstCount int
+	inFlight         map[string]int
+	lastRateLog      map[string]time.Time
+	cachePath        string
+	collageCache     sync.Map
+	settingsMu       sync.RWMutex
+	settings         *persistedAppSettings
 }
 
 func quotaCachePath() string {
@@ -239,22 +237,24 @@ func NewAiVisionService() AiVisionService {
 		apiKey:  primaryKey,
 		apiKeys: keys,
 		httpClient: &http.Client{
-			Timeout:   45 * time.Second,
+			Timeout:   20 * time.Second,
 			Transport: transport,
 		},
-		modelName:   primaryModel,
-		models:      models,
-		cooldowns:   make(map[string]time.Time),
-		lastUsed:    make(map[string]time.Time),
-		inFlight:    make(map[string]int),
-		lastRateLog: make(map[string]time.Time),
-		cachePath:   quotaCachePath(),
+		modelName:       primaryModel,
+		models:          models,
+		cooldowns:       make(map[string]time.Time),
+		lastUsed:        make(map[string]time.Time),
+		lastKeyUsed:     make(map[string]time.Time),
+		sharedKeyBucket: make(map[string]bool),
+		inFlight:        make(map[string]int),
+		lastRateLog:     make(map[string]time.Time),
+		cachePath:       quotaCachePath(),
 	}
 	svc.loadQuotaCache()
 	svc.initSettings(keys)
 	activeCount := len(svc.getKeys())
 	log.Printf("[AI-Vision] โหลด Gemini API Keys สำเร็จจำนวน %d Keys (%d เส้นทางความเร็วสูง, %d Workers) พร้อมระบบ Smooth Pacing ต่อเนื่อง",
-		activeCount, activeCount*3, svc.WorkerConcurrency())
+		activeCount, activeCount*2, svc.WorkerConcurrency())
 	return svc
 }
 
@@ -329,31 +329,41 @@ func isDailyQuotaError(code int, msg string) bool {
 		strings.Contains(lower, "daily")
 }
 
-// minModelInterval returns the smooth pacing interval per (project, model) bucket
-// so requests stay within Google's RPM ceiling and never stall for 15 seconds.
+// minModelInterval returns per-route cooldown interval.
 func minModelInterval(model string) time.Duration {
 	lower := strings.ToLower(model)
 	switch {
-	case strings.HasPrefix(lower, "gemma-"):
-		return 2000 * time.Millisecond // 30 RPM per project
 	case strings.Contains(lower, "flash-lite"):
-		return 3700 * time.Millisecond // 15 RPM per project
+		return 9600 * time.Millisecond
 	default:
-		return 9500 * time.Millisecond // 5 RPM per project
+		return 12500 * time.Millisecond
 	}
 }
 
-// modelTierBias prioritizes ultra-fast JSON-native Flash-Lite models when immediately ready,
-// while smoothly overflowing to high-quota Gemma-4 or standard Flash models whenever Flash-Lite is pacing.
+// modelTierBias prioritizes Flash-Lite models over fallback models.
 func modelTierBias(model string) time.Duration {
 	lower := strings.ToLower(model)
 	switch {
-	case strings.Contains(lower, "flash-lite"):
+	case lower == "gemini-3.5-flash-lite":
 		return 0
-	case strings.HasPrefix(lower, "gemma-"):
-		return 350 * time.Millisecond
+	case strings.Contains(lower, "flash-lite"):
+		return 120 * time.Millisecond
 	default:
-		return 900 * time.Millisecond
+		return 30 * time.Second
+	}
+}
+
+// globalSmoothGap returns delay between global request launches.
+func globalSmoothGap(keyCount int) time.Duration {
+	switch {
+	case keyCount <= 1:
+		return 1800 * time.Millisecond
+	case keyCount <= 3:
+		return 950 * time.Millisecond
+	case keyCount <= 5:
+		return 650 * time.Millisecond
+	default:
+		return 380 * time.Millisecond
 	}
 }
 
@@ -381,13 +391,22 @@ func (s *geminiVisionService) markRpmCooldown(key, model string, d time.Duration
 	if s.lastRateLog == nil {
 		s.lastRateLog = make(map[string]time.Time)
 	}
+	if s.sharedKeyBucket == nil {
+		s.sharedKeyBucket = make(map[string]bool)
+	}
 	id := key + "|" + model
 	until := now.Add(d)
 	if existing, ok := s.cooldowns[id]; !ok || until.After(existing) {
 		s.cooldowns[id] = until
 	}
+	// Mark key as shared-bucket if secondary model hits 429 right after primary model.
+	if model != "gemini-3.5-flash-lite" {
+		if lu35, ok := s.lastUsed[key+"|gemini-3.5-flash-lite"]; ok && now.Sub(lu35) < 9500*time.Millisecond {
+			s.sharedKeyBucket[key] = true
+		}
+	}
 	shouldLog := false
-	if last, ok := s.lastRateLog[model]; !ok || now.Sub(last) > 4*time.Second {
+	if last, ok := s.lastRateLog[model]; !ok || now.Sub(last) > 6*time.Second {
 		s.lastRateLog[model] = now
 		shouldLog = true
 	}
@@ -409,8 +428,7 @@ func (s *geminiVisionService) releaseEndpoint(key, model string) {
 	s.cooldownMu.Unlock()
 }
 
-// acquireEndpoint atomically selects and reserves the earliest-available (key, model) slot
-// across all configured projects and models, waiting smoothly if needed so requests never burst-fail.
+// acquireEndpoint selects the next available (key, model) slot.
 func (s *geminiVisionService) acquireEndpoint(ctx context.Context, tried map[string]bool) (string, string, error) {
 	keys := s.getKeys()
 	models := s.getModels()
@@ -427,11 +445,40 @@ func (s *geminiVisionService) acquireEndpoint(ctx context.Context, tried map[str
 	if s.lastUsed == nil {
 		s.lastUsed = make(map[string]time.Time)
 	}
+	if s.lastKeyUsed == nil {
+		s.lastKeyUsed = make(map[string]time.Time)
+	}
+	if s.sharedKeyBucket == nil {
+		s.sharedKeyBucket = make(map[string]bool)
+	}
 	if s.inFlight == nil {
 		s.inFlight = make(map[string]int)
 	}
 
 	now := time.Now()
+
+	// Check if any Flash-Lite route is available.
+	hasAvailableFlashLite := false
+	for _, k := range keys {
+		for _, m := range models {
+			if !isPrimaryFlashLiteModel(m) {
+				continue
+			}
+			id := k + "|" + m
+			if tried != nil && tried[id] {
+				continue
+			}
+			if until, ok := s.cooldowns[id]; ok && until.Sub(now) > 25*time.Minute {
+				continue
+			}
+			hasAvailableFlashLite = true
+			break
+		}
+		if hasAvailableFlashLite {
+			break
+		}
+	}
+
 	bestKey := ""
 	bestModel := ""
 	var bestSlotTime time.Time
@@ -447,32 +494,47 @@ func (s *geminiVisionService) acquireEndpoint(ctx context.Context, tried map[str
 		if tried != nil && tried[id] {
 			continue
 		}
+		if hasAvailableFlashLite && !isPrimaryFlashLiteModel(m) {
+			continue
+		}
 
-		// Check cooldown
 		slotTime := now
 		if until, ok := s.cooldowns[id]; ok {
 			if now.After(until) {
 				delete(s.cooldowns, id)
 			} else if until.Sub(now) > 25*time.Minute {
-				// Daily RPD limit exhausted on this endpoint; skip completely
 				continue
 			} else if until.After(slotTime) {
 				slotTime = until
 			}
 		}
 
-		// Apply smooth per-(key, model) pacing interval
+		interval := minModelInterval(m)
+
 		if lu, ok := s.lastUsed[id]; ok {
-			nextAllowed := lu.Add(minModelInterval(m))
+			nextAllowed := lu.Add(interval)
 			if nextAllowed.After(slotTime) {
 				slotTime = nextAllowed
 			}
 		}
 
-		// Soft score includes active in-flight count and model tier preference
+		if s.sharedKeyBucket[k] {
+			if lku, ok := s.lastKeyUsed[k]; ok {
+				nextKeyAllowed := lku.Add(interval)
+				if nextKeyAllowed.After(slotTime) {
+					slotTime = nextKeyAllowed
+				}
+			}
+		} else if lku, ok := s.lastKeyUsed[k]; ok {
+			minKeyGap := lku.Add(5200 * time.Millisecond)
+			if minKeyGap.After(slotTime) {
+				slotTime = minKeyGap
+			}
+		}
+
 		activeReqs := s.inFlight[id]
 		scoreTime := slotTime.
-			Add(time.Duration(activeReqs) * 2200 * time.Millisecond).
+			Add(time.Duration(activeReqs) * 5000 * time.Millisecond).
 			Add(modelTierBias(m))
 
 		if bestKey == "" || scoreTime.Before(bestScoreTime) {
@@ -484,22 +546,34 @@ func (s *geminiVisionService) acquireEndpoint(ctx context.Context, tried map[str
 	}
 
 	if bestKey == "" {
-		// Fallback if all combinations were tried or in daily RPD limit
 		bestKey = keys[seq%len(keys)]
 		bestModel = models[0]
 		bestSlotTime = now
 	}
 
+	// Stagger launches after the initial 3 requests.
+	if now.Sub(s.lastGlobalSlot) > 3*time.Second {
+		s.smoothBurstCount = 0
+	}
+	s.smoothBurstCount++
+	if s.smoothBurstCount > 3 {
+		minGlobalNext := s.lastGlobalSlot.Add(globalSmoothGap(len(keys)))
+		if minGlobalNext.After(bestSlotTime) {
+			bestSlotTime = minGlobalNext
+		}
+	}
+	s.lastGlobalSlot = bestSlotTime
+
 	bestID := bestKey + "|" + bestModel
-	// Reserve this slot immediately so concurrent workers pick the next available key/model
 	s.lastUsed[bestID] = bestSlotTime
+	s.lastKeyUsed[bestKey] = bestSlotTime
 	s.inFlight[bestID]++
 	s.cooldownMu.Unlock()
 
 	waitDur := time.Until(bestSlotTime)
 	if waitDur > 5*time.Millisecond {
-		if waitDur > 8*time.Second {
-			waitDur = 8 * time.Second
+		if waitDur > 15*time.Second {
+			waitDur = 15 * time.Second
 		}
 		timer := time.NewTimer(waitDur)
 		select {
@@ -520,14 +594,14 @@ func (s *geminiVisionService) callGeminiWithFallback(ctx context.Context, prompt
 		return "", errors.New("no API key available")
 	}
 
-	maxAttempts := 5
+	maxAttempts := 6
 	if len(keys) == 1 {
-		maxAttempts = 3
+		maxAttempts = 4
 	}
 
 	client := s.httpClient
 	if client == nil {
-		client = &http.Client{Timeout: 45 * time.Second}
+		client = &http.Client{Timeout: 20 * time.Second}
 	}
 
 	tried := make(map[string]bool, maxAttempts)
@@ -588,6 +662,12 @@ func (s *geminiVisionService) callGeminiWithFallback(ctx context.Context, prompt
 			return "", fmt.Errorf("create http request error: %w", err)
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+
+		reqStart := time.Now()
+		s.cooldownMu.Lock()
+		s.lastUsed[apiKey+"|"+modelName] = reqStart
+		s.lastKeyUsed[apiKey] = reqStart
+		s.cooldownMu.Unlock()
 
 		resp, err := client.Do(httpReq)
 		if err != nil {
@@ -721,16 +801,6 @@ func (s *geminiVisionService) AnalyzePhoto(ctx context.Context, filePath string)
 	return &result, nil
 }
 
-type batchItemWire struct {
-	Index       int      `json:"i"`
-	Description string   `json:"d"`
-	Tags        []string `json:"t"`
-	// Fallback full key names if model uses them
-	AltIndex       int      `json:"index"`
-	AltDescription string   `json:"description"`
-	AltTags        []string `json:"tags"`
-}
-
 func batchCacheKey(filePaths []string) string {
 	if len(filePaths) == 0 {
 		return ""
@@ -738,8 +808,7 @@ func batchCacheKey(filePaths []string) string {
 	return fmt.Sprintf("%d:%s:%s", len(filePaths), filePaths[0], filePaths[len(filePaths)-1])
 }
 
-// PrebuildBatchCollages pre-encodes grid collages in parallel CPU goroutines
-// so API workers have 0ms image-building wait time between requests.
+// PrebuildBatchCollages pre-encodes grid collages in background goroutines.
 func (s *geminiVisionService) PrebuildBatchCollages(ctx context.Context, batches [][]string) {
 	ch := make(chan []string, len(batches))
 	for _, b := range batches {
@@ -772,8 +841,7 @@ func (s *geminiVisionService) PrebuildBatchCollages(ctx context.Context, batches
 	wg.Wait()
 }
 
-// AnalyzePhotoBatch combines up to 25 photos into a single numbered Grid Collage JPEG
-// and analyzes all of them in 1 single Gemini request using the multi-key/multi-model pool.
+// AnalyzePhotoBatch combines photos into a grid collage and analyzes them in one request.
 func (s *geminiVisionService) AnalyzePhotoBatch(ctx context.Context, filePaths []string) ([]*VisionResult, error) {
 	n := len(filePaths)
 	if n == 0 {
@@ -853,22 +921,18 @@ func (s *geminiVisionService) AnalyzePhotoBatch(ctx context.Context, filePaths [
 	return results, nil
 }
 
-// parseBatchJsonItems parses a JSON array of batchItemWire, automatically recovering
-// from extra trailing brackets (e.g. "]]"), wrapper objects, or partial formatting errors
-// by extracting each balanced {...} object individually if full-array unmarshaling fails.
+// parseBatchJsonItems parses batch JSON items and falls back to object-by-object extraction.
 func parseBatchJsonItems(raw string) ([]batchItemWire, error) {
 	s := strings.TrimSpace(raw)
 	if s == "" {
 		return nil, errors.New("empty response text")
 	}
 
-	// 1. Try direct unmarshal if already a clean array
 	var items []batchItemWire
 	if err := json.Unmarshal([]byte(s), &items); err == nil && len(items) > 0 {
 		return items, nil
 	}
 
-	// 2. Extract each balanced {...} object directly (ignores outer extra brackets like "]]" or prose "[0]")
 	var recovered []batchItemWire
 	inString := false
 	escaped := false
@@ -921,8 +985,7 @@ func parseBatchJsonItems(raw string) ([]batchItemWire, error) {
 	return nil, errors.New("no valid JSON objects found in batch response")
 }
 
-// buildGridCollageJPEG decodes a batch of images, scales each into a cellDim x cellDim tile,
-// draws the tile index [0..N-1] in the top-left corner, and encodes a single JPEG contact sheet.
+// buildGridCollageJPEG builds a numbered JPEG grid collage from image paths.
 func buildGridCollageJPEG(filePaths []string, cellDim int) ([]byte, error) {
 	n := len(filePaths)
 	cols := 5
@@ -989,8 +1052,7 @@ func decodeImageFast(filePath string, targetDim int) image.Image {
 	return img
 }
 
-// drawScaledTile performs 2x2 box-filtered anti-aliased scaling of src into canvas at (ox, oy, w, h)
-// so fine visual details remain crisp without jagged aliasing.
+// drawScaledTile scales src into dst at (ox, oy, w, h).
 func drawScaledTile(dst *image.RGBA, ox, oy, w, h int, src image.Image) {
 	sb := src.Bounds()
 	sw := sb.Dx()

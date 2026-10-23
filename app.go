@@ -9,6 +9,9 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -127,6 +130,29 @@ func (a *App) DeletePhotosFromDest(destPath string, targets []string, isAll bool
 	return a.backupService.DeleteFromDest(destPath, targets, isAll)
 }
 
+
+// GetFullPhotoBase64 returns base64 data URL of the original full-size photo
+func (a *App) GetFullPhotoBase64(fullPath string) (string, error) {
+	bytes, err := os.ReadFile(fullPath)
+	if err != nil {
+		return "", err
+	}
+	mimeType := "image/jpeg"
+	ext := strings.ToLower(filepath.Ext(fullPath))
+	switch ext {
+	case ".png":
+		mimeType = "image/png"
+	case ".gif":
+		mimeType = "image/gif"
+	case ".webp":
+		mimeType = "image/webp"
+	case ".svg":
+		mimeType = "image/svg+xml"
+	case ".bmp":
+		mimeType = "image/bmp"
+	}
+	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(bytes)), nil
+}
 
 // GetPhotoThumbnail returns base64 data URL for a single photo
 func (a *App) GetPhotoThumbnail(fullPath string) (string, error) {

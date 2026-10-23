@@ -19,6 +19,8 @@ export function GetAppSettings():Promise<dto.AppSettingsDTO>;
 
 export function GetDestPath():Promise<string>;
 
+export function GetFullPhotoBase64(arg1:string):Promise<string>;
+
 export function GetPhotoThumbnail(arg1:string):Promise<string>;
 
 export function GetPhotoThumbnails(arg1:Array<string>):Promise<Record<string, string>>;

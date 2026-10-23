@@ -34,6 +34,10 @@ export function GetDestPath() {
   return window['go']['main']['App']['GetDestPath']();
 }
 
+export function GetFullPhotoBase64(arg1) {
+  return window['go']['main']['App']['GetFullPhotoBase64'](arg1);
+}
+
 export function GetPhotoThumbnail(arg1) {
   return window['go']['main']['App']['GetPhotoThumbnail'](arg1);
 }

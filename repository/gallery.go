@@ -328,12 +328,18 @@ func (r *galleryRepository) GetByID(ctx context.Context, id int32) (*dto.PhotoDe
 	return r.toPhotoDetail(ctx, photo)
 }
 
-// FindActiveByID returns the active photo row by ID (used by the image server)
+// FindActiveByID returns the photo row by ID (used by the image server)
 func (r *galleryRepository) FindActiveByID(ctx context.Context, id int32) (*model.Photo, error) {
 	p := r.q.Photo
-	return p.WithContext(ctx).
+	photo, err := p.WithContext(ctx).
 		Where(p.ID.Eq(id)).
 		Where(p.Status.Eq("active")).
+		First()
+	if err == nil && photo != nil {
+		return photo, nil
+	}
+	return p.WithContext(ctx).
+		Where(p.ID.Eq(id)).
 		First()
 }
 

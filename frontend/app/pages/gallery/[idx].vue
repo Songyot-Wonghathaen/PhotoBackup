@@ -30,11 +30,11 @@
 
       <!-- Main 2-Column Content Layout -->
       <div class="detail-content-layout">
-        <!-- Left Column: Big Preview + Thumbnails Strip -->
+        <!-- Left Column: Big Real Image Preview -->
         <section class="preview-column">
-          <!-- Big Picture Preview: original from /image/{id}, gradient art as fallback -->
+          <!-- Big Picture Preview: original full-size image from /image/{id}, gradient art as fallback -->
           <div class="main-preview-card">
-            <img v-if="!previewFailed" :src="previewUrl" class="preview-img" alt="" @error="previewFailed = true" />
+            <img v-if="!previewFailed" :src="previewUrl" class="preview-img" alt="" @error="handleImageError" />
             <template v-else>
               <div class="preview-sun"></div>
               <svg class="preview-wave preview-wave-back" viewBox="0 0 560 200" preserveAspectRatio="none">
@@ -44,17 +44,6 @@
                 <path d="M0,130 C150,70 320,140 560,95 L560,200 L0,200 Z" fill="#64748B" />
               </svg>
             </template>
-          </div>
-
-          <!-- Thumbnails Strip below preview: other photos from the gallery API -->
-          <div class="thumbnails-strip">
-            <div v-for="thumb in strip" :key="thumb.id" class="thumb-strip-item"
-              :class="{ active: thumb.id === photoId }" @click="selectPhoto(thumb.id)">
-              <div class="thumb-mini-art">
-                <img :src="thumb.thumb_url || thumbUrl(thumb.id)" class="thumb-mini-img" alt="" loading="lazy" />
-              </div>
-            </div>
-            <span v-if="strip.length === 0 && !photoApi.loading" class="strip-empty">ไม่มีรูปภาพอื่นในโฟลเดอร์นี้</span>
           </div>
         </section>
 
@@ -216,7 +205,6 @@ const photoApi = usePhotoApi()
 
 const photoId = computed(() => Number(route.params.idx))
 const photo = ref<PhotoDetail | null>(null)
-const strip = ref<PhotoListItem[]>([])
 
 function handleBack() {
   if (typeof window !== 'undefined' && window.history.length > 1) {
@@ -231,13 +219,32 @@ const isEditingDesc = ref(false)
 const descDraft = ref('')
 const isSavingDesc = ref(false)
 
-// Real image loading with fallback to the gradient art
+// Real full-size image loading with fallback
 const previewFailed = ref(false)
 const previewBase64 = ref('')
 const previewUrl = computed(() => {
   if (previewBase64.value) return previewBase64.value
-  return photo.value ? (photo.value.thumb_url || imageUrl(photo.value.id)) : ''
+  return photo.value ? imageUrl(photo.value.id) : ''
 })
+
+async function handleImageError() {
+  if (photo.value?.full_path && !previewBase64.value) {
+    const getFullFn = (window as any)?.go?.main?.App?.GetFullPhotoBase64
+    if (typeof getFullFn === 'function') {
+      try {
+        const b64 = await getFullFn(photo.value.full_path)
+        if (b64) {
+          previewBase64.value = b64
+          previewFailed.value = false
+          return
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+  previewFailed.value = true
+}
 
 // Tag editing with autocomplete (Feature 19)
 const isAddingTag = ref(false)
@@ -251,44 +258,21 @@ async function loadDetail() {
     photo.value = detail
     previewFailed.value = false
     previewBase64.value = ''
-    const getThumbFn = (window as any)?.go?.main?.App?.GetThumbnailBase64
-    if (detail.full_path && typeof getThumbFn === 'function') {
+
+    // Attempt proactive full-resolution base64 if available
+    const getFullFn = (window as any)?.go?.main?.App?.GetFullPhotoBase64
+    if (detail.full_path && typeof getFullFn === 'function') {
       try {
-        const b64 = await getThumbFn(detail.full_path)
+        const b64 = await getFullFn(detail.full_path)
         if (b64) {
           previewBase64.value = b64
           previewFailed.value = false
         }
       } catch {
-        // ignore
+        // Fall back to /image/{id}
       }
     }
   }
-}
-
-// Other photos for the thumbnails strip
-async function loadStrip() {
-  if (!destPath.value) return
-  const result = await photoApi.searchPhotos(destPath.value, { query: '', tag_ids: [], page: 1, page_size: 8 })
-  if (result) {
-    strip.value = result.items || []
-    const getThumbFn = (window as any)?.go?.main?.App?.GetThumbnailBase64
-    if (typeof getThumbFn === 'function') {
-      for (const item of strip.value) {
-        if (!item.full_path) continue
-        try {
-          const b64 = await getThumbFn(item.full_path)
-          if (b64) item.thumb_url = b64
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }
-}
-
-function selectPhoto(id: number) {
-  if (id !== photoId.value) navigateTo(`/gallery/${id}`)
 }
 
 // Feature 19: edit description, save through the backend and refresh from its result
@@ -425,12 +409,10 @@ function handleDelete() {
 
 onMounted(async () => {
   await loadDetail()
-  await loadStrip()
 })
 
 watch(photoId, async () => {
   await loadDetail()
-  await loadStrip()
 })
 </script>
 
@@ -705,63 +687,23 @@ watch(photoId, async () => {
 .main-preview-card {
   position: relative;
   width: 100%;
-  height: 380px;
+  min-height: 480px;
+  max-height: 700px;
   border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
-}
-
-.preview-sun {
-  position: absolute;
-  top: 60px;
-  left: 36%;
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  box-shadow: 0 0 24px rgba(255, 255, 255, 0.6);
-}
-
-.preview-wave {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  height: 150px;
-}
-
-.preview-wave-front {
-  height: 105px;
-}
-
-/* Thumbnails Strip */
-.thumbnails-strip {
+  background: #0F172A;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
   display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 4px;
+  align-items: center;
+  justify-content: center;
 }
 
-.thumb-strip-item {
-  width: 98px;
-  height: 66px;
-  border-radius: 10px;
-  border: 1.5px solid #E5E7EB;
-  overflow: hidden;
-  cursor: pointer;
-  box-sizing: border-box;
-  transition: all 0.15s ease;
-  background: #FFFFFF;
-}
-
-.thumb-strip-item.active {
-  border: 2px solid #4F46E5;
-  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
-}
-
-.thumb-mini-art {
-  position: relative;
+.preview-img {
   width: 100%;
   height: 100%;
+  max-height: 700px;
+  object-fit: contain;
+  display: block;
 }
 
 /* Right Column: Cards */

@@ -6,6 +6,10 @@ export function AnalyzePhoto(arg1) {
   return window['go']['service']['BackupService']['AnalyzePhoto'](arg1);
 }
 
+export function Backup(arg1, arg2) {
+  return window['go']['service']['BackupService']['Backup'](arg1, arg2);
+}
+
 export function CancelAnalysis() {
   return window['go']['service']['BackupService']['CancelAnalysis']();
 }

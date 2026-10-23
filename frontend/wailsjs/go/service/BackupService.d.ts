@@ -8,6 +8,8 @@ import {repository} from '../models';
 
 export function AnalyzePhoto(arg1:string):Promise<dto.VisionResult>;
 
+export function Backup(arg1:Array<string>,arg2:boolean):Promise<dto.MoveSummary>;
+
 export function CancelAnalysis():Promise<void>;
 
 export function CheckIntegrity(arg1:string):Promise<dto.IntegrityResult>;

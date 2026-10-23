@@ -2,10 +2,11 @@ package dto
 
 // SearchParams carries gallery search filters for Features 15, 16, 17
 type SearchParams struct {
-	Query    string `json:"query"`
-	TagIDs   []int32 `json:"tag_ids"`
-	Page     int    `json:"page"`
-	PageSize int    `json:"page_size"`
+	Query         string   `json:"query"`
+	TagIDs        []int32  `json:"tag_ids"`
+	Page          int      `json:"page"`
+	PageSize      int      `json:"page_size"`
+	ExpandedTerms []string `json:"expanded_terms,omitempty"`
 }
 
 // PhotoListItem represents a photo card in gallery search results
@@ -27,6 +28,7 @@ type SearchResult struct {
 	Page          int             `json:"page"`
 	PageSize      int             `json:"page_size"`
 	TotalPages    int             `json:"total_pages"`
+	ExpandedTerms []string        `json:"expanded_terms,omitempty"`
 }
 
 // TagCount represents a tag name with its photo count

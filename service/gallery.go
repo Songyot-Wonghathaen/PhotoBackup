@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"PhotoVault/controller/dto"
@@ -30,14 +31,26 @@ const (
 type GalleryService struct {
 	ctx         context.Context
 	galleryRepo repository.GalleryRepository
+	aiVision    AiVisionService
 	mu          sync.RWMutex
 }
 
-func NewGalleryService(galleryRepo repository.GalleryRepository) *GalleryService {
+func NewGalleryService(galleryRepo repository.GalleryRepository, aiVision ...AiVisionService) *GalleryService {
+	var ai AiVisionService
+	if len(aiVision) > 0 {
+		ai = aiVision[0]
+	}
 	return &GalleryService{
 		ctx:         context.Background(),
 		galleryRepo: galleryRepo,
+		aiVision:    ai,
 	}
+}
+
+func (s *GalleryService) SetAiVision(ai AiVisionService) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.aiVision = ai
 }
 
 func (s *GalleryService) SetContext(ctx context.Context) {
@@ -89,7 +102,26 @@ func (s *GalleryService) SearchPhotos(dest string, params dto.SearchParams) (*dt
 		params.PageSize = maxGalleryPageSize
 	}
 	params.TagIDs = uniqueTagIDs(params.TagIDs)
-	return s.galleryRepo.Search(s.getCtx(), dest, params)
+
+	// Level 2: AI Query Expansion
+	// If query is present and AI is available, expand query terms (e.g. "ขนมปังไหม้" -> ["ขนมปังไหม้", "ขนมปังเกรียม", "ขนมปังปิ้ง", "ขนมปัง", "toast"])
+	if params.Query != "" && s.aiVision != nil && s.aiVision.IsAvailable() && len(params.ExpandedTerms) == 0 {
+		ctx, cancel := context.WithTimeout(s.getCtx(), 4*time.Second)
+		expanded, err := s.aiVision.ExpandSearchQuery(ctx, params.Query)
+		cancel()
+		if err == nil && len(expanded) > 0 {
+			params.ExpandedTerms = expanded
+		}
+	}
+
+	result, err := s.galleryRepo.Search(s.getCtx(), dest, params)
+	if err != nil {
+		return nil, err
+	}
+	if result != nil && len(params.ExpandedTerms) > 0 {
+		result.ExpandedTerms = params.ExpandedTerms
+	}
+	return result, nil
 }
 
 // GetTagCloud returns tags ordered by photo count (Feature 16)

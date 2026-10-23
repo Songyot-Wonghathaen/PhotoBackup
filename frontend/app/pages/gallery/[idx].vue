@@ -60,46 +60,6 @@
             </span>
           </div>
 
-          <!-- AI Description Card (Figma Screen) -->
-          <div class="info-card ai-desc-card">
-            <div class="card-header-row">
-              <div class="card-title-badge">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" stroke-width="2">
-                  <path
-                    d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                </svg>
-                <span>คำอธิบายจาก AI</span>
-              </div>
-
-              <div class="header-action-group">
-                <button class="btn-ai-live" :disabled="isAnalyzingLive" @click="handleRunAiAnalysis"
-                  title="ส่งภาพให้ Gemini วิเคราะห์คำอธิบายและ Tag ใหม่">
-                  <span v-if="!isAnalyzingLive">✨ วิเคราะห์ด้วย AI</span>
-                  <span v-else>⏳ กำลังวิเคราะห์...</span>
-                </button>
-                <button v-if="isAnalyzingLive" class="btn-cancel-ai" @click="handleCancelAnalysis"
-                  title="ยกเลิกการวิเคราะห์">
-                  ✕ ยกเลิก
-                </button>
-                <!-- <button class="btn-edit" :disabled="isSavingDesc" @click="toggleEditDesc">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                    stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                  </svg>
-                  <span>{{ isEditingDesc ? (isSavingDesc ? 'กำลังบันทึก...' : 'เสร็จสิ้น') : 'แก้ไข' }}</span>
-                </button> -->
-              </div>
-            </div>
-
-            <div v-if="!isEditingDesc" class="ai-desc-text">
-              {{ photo.description || 'ยังไม่มีคำอธิบาย' }}
-            </div>
-            <div v-else class="edit-desc-box">
-              <textarea v-model="descDraft" class="desc-textarea" rows="3"></textarea>
-            </div>
-          </div>
-
           <!-- Tags Card -->
           <div class="info-card tags-card">
             <div class="card-title-row">

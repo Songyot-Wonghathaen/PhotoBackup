@@ -1,12 +1,12 @@
 <template>
   <div class="photo-detail-page">
     <!-- Loading / error states bound to real API status -->
-    <div v-if="photoApi.loading && !photo" class="detail-state detail-loading">
+    <div v-if="photoApi.loading.value && !photo" class="detail-state detail-loading">
       <span class="state-spinner"></span>
       <span>กำลังโหลดข้อมูลรูปภาพ...</span>
     </div>
-    <div v-else-if="photoApi.error && !photo" class="detail-state detail-error">
-      <span>{{ photoApi.error }}</span>
+    <div v-else-if="photoApi.error.value && !photo" class="detail-state detail-error">
+      <span>{{ photoApi.error.value }}</span>
       <button class="btn-state-retry" @click="loadDetail()">ลองอีกครั้ง</button>
     </div>
 
@@ -18,23 +18,23 @@
           <p class="header-subtitle">รายละเอียดรูปภาพ</p>
         </div>
 
-        <NuxtLink to="/gallery" class="btn-back">
+        <button type="button" class="btn-back" @click="handleBack">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
             <line x1="19" y1="12" x2="5" y2="12" />
             <polyline points="12 19 5 12 12 5" />
           </svg>
-          <span>กลับไปแกลเลอรี่</span>
-        </NuxtLink>
+          <span>ย้อนกลับ</span>
+        </button>
       </header>
 
       <!-- Main 2-Column Content Layout -->
       <div class="detail-content-layout">
-        <!-- Left Column: Big Preview + Thumbnails Strip -->
+        <!-- Left Column: Big Real Image Preview -->
         <section class="preview-column">
-          <!-- Big Picture Preview: original from /image/{id}, gradient art as fallback -->
+          <!-- Big Picture Preview: original full-size image from /image/{id}, gradient art as fallback -->
           <div class="main-preview-card">
-            <img v-if="!previewFailed" :src="previewUrl" class="preview-img" alt="" @error="previewFailed = true" />
+            <img v-if="!previewFailed" :src="previewUrl" class="preview-img" alt="" @error="handleImageError" />
             <template v-else>
               <div class="preview-sun"></div>
               <svg class="preview-wave preview-wave-back" viewBox="0 0 560 200" preserveAspectRatio="none">
@@ -44,17 +44,6 @@
                 <path d="M0,130 C150,70 320,140 560,95 L560,200 L0,200 Z" fill="#64748B" />
               </svg>
             </template>
-          </div>
-
-          <!-- Thumbnails Strip below preview: other photos from the gallery API -->
-          <div class="thumbnails-strip">
-            <div v-for="thumb in strip" :key="thumb.id" class="thumb-strip-item"
-              :class="{ active: thumb.id === photoId }" @click="selectPhoto(thumb.id)">
-              <div class="thumb-mini-art">
-                <img :src="thumbUrl(thumb.id)" class="thumb-mini-img" alt="" loading="lazy" />
-              </div>
-            </div>
-            <span v-if="strip.length === 0 && !photoApi.loading" class="strip-empty">ไม่มีรูปภาพอื่นในโฟลเดอร์นี้</span>
           </div>
         </section>
 
@@ -79,11 +68,11 @@
                   <path
                     d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
                 </svg>
-                <span>คำอธิบายจาก AI</span>
+                <!-- <span>คำอธิบายจาก AI</span> -->
               </div>
 
               <div class="header-action-group">
-                <button class="btn-ai-live" :disabled="isAnalyzingLive" @click="handleRunAiAnalysis"
+                <!-- <button class="btn-ai-live" :disabled="isAnalyzingLive" @click="handleRunAiAnalysis"
                   title="ส่งภาพให้ Gemini วิเคราะห์คำอธิบายและ Tag ใหม่">
                   <span v-if="!isAnalyzingLive">✨ วิเคราะห์ด้วย AI</span>
                   <span v-else>⏳ กำลังวิเคราะห์...</span>
@@ -91,7 +80,7 @@
                 <button v-if="isAnalyzingLive" class="btn-cancel-ai" @click="handleCancelAnalysis"
                   title="ยกเลิกการวิเคราะห์">
                   ✕ ยกเลิก
-                </button>
+                </button> -->
                 <!-- <button class="btn-edit" :disabled="isSavingDesc" @click="toggleEditDesc">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                     stroke-linecap="round" stroke-linejoin="round">
@@ -210,21 +199,52 @@ import type { PhotoDetail, PhotoListItem, TagItem } from '~/composables/usePhoto
 import { formatBytes } from '~/utils/formatters'
 
 const route = useRoute()
+const router = useRouter()
 const { destPath } = useBackup()
 const photoApi = usePhotoApi()
 
 const photoId = computed(() => Number(route.params.idx))
 const photo = ref<PhotoDetail | null>(null)
-const strip = ref<PhotoListItem[]>([])
+
+function handleBack() {
+  if (typeof window !== 'undefined' && window.history.length > 1) {
+    router.back()
+  } else {
+    router.push('/gallery')
+  }
+}
 
 // Description editing (Feature 19)
 const isEditingDesc = ref(false)
 const descDraft = ref('')
 const isSavingDesc = ref(false)
 
-// Real image loading with fallback to the gradient art
+// Real full-size image loading with fallback
 const previewFailed = ref(false)
-const previewUrl = computed(() => (photo.value ? imageUrl(photo.value.id) : ''))
+const previewBase64 = ref('')
+const previewUrl = computed(() => {
+  if (previewBase64.value) return previewBase64.value
+  return photo.value ? imageUrl(photo.value.id) : ''
+})
+
+async function handleImageError() {
+  if (photo.value?.full_path && !previewBase64.value) {
+    const getFullFn = (window as any)?.go?.main?.App?.GetFullPhotoBase64
+    if (typeof getFullFn === 'function') {
+      try {
+        const b64 = await getFullFn(photo.value.full_path)
+        if (b64) {
+          previewBase64.value = b64
+          previewFailed.value = false
+          return
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+  previewFailed.value = true
+}
 
 // Tag editing with autocomplete (Feature 19)
 const isAddingTag = ref(false)
@@ -237,18 +257,22 @@ async function loadDetail() {
   if (detail) {
     photo.value = detail
     previewFailed.value = false
+    previewBase64.value = ''
+
+    // Attempt proactive full-resolution base64 if available
+    const getFullFn = (window as any)?.go?.main?.App?.GetFullPhotoBase64
+    if (detail.full_path && typeof getFullFn === 'function') {
+      try {
+        const b64 = await getFullFn(detail.full_path)
+        if (b64) {
+          previewBase64.value = b64
+          previewFailed.value = false
+        }
+      } catch {
+        // Fall back to /image/{id}
+      }
+    }
   }
-}
-
-// Other photos for the thumbnails strip
-async function loadStrip() {
-  if (!destPath.value) return
-  const result = await photoApi.searchPhotos(destPath.value, { query: '', tag_ids: [], page: 1, page_size: 8 })
-  if (result) strip.value = result.items || []
-}
-
-function selectPhoto(id: number) {
-  if (id !== photoId.value) navigateTo(`/gallery/${id}`)
 }
 
 // Feature 19: edit description, save through the backend and refresh from its result
@@ -346,11 +370,21 @@ async function handleRunAiAnalysis() {
       result = await (window as any).go.service.BackupService.AnalyzePhoto(path)
     }
     if (result) {
-      if (result.description) {
+      if (result.description && photo.value.id) {
         photo.value = { ...photo.value, description: result.description }
         await photoApi.updateDescription(photo.value.id, result.description)
       }
-      alert(`AI วิเคราะห์ภาพสำเร็จ!\n\nคำอธิบาย: ${result.description}\nแท็ก: ${(result.tags || []).join(', ')}`)
+      if (result.tags && Array.isArray(result.tags) && result.tags.length > 0 && photo.value.id) {
+        for (const tag of result.tags) {
+          try {
+            await photoApi.addTag(photo.value.id, tag)
+          } catch (tErr) {
+            console.warn('Failed to add tag:', tag, tErr)
+          }
+        }
+      }
+      await loadDetail()
+      alert(`AI วิเคราะห์ภาพสำเร็จ!\n\nคำอธิบาย: ${result.description || '(ไม่มี)'}\nแท็ก: ${(result.tags || []).join(', ')}`)
     } else {
       alert('ไม่สามารถวิเคราะห์ภาพได้ หรือยังไม่ได้ตั้งค่า API Key')
     }
@@ -375,12 +409,10 @@ function handleDelete() {
 
 onMounted(async () => {
   await loadDetail()
-  await loadStrip()
 })
 
 watch(photoId, async () => {
   await loadDetail()
-  await loadStrip()
 })
 </script>
 
@@ -627,6 +659,7 @@ watch(photoId, async () => {
   padding: 8px 18px;
   border-radius: 10px;
   text-decoration: none;
+  cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   transition: all 0.15s ease;
 }
@@ -654,63 +687,23 @@ watch(photoId, async () => {
 .main-preview-card {
   position: relative;
   width: 100%;
-  height: 380px;
+  min-height: 480px;
+  max-height: 700px;
   border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
-}
-
-.preview-sun {
-  position: absolute;
-  top: 60px;
-  left: 36%;
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  box-shadow: 0 0 24px rgba(255, 255, 255, 0.6);
-}
-
-.preview-wave {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  height: 150px;
-}
-
-.preview-wave-front {
-  height: 105px;
-}
-
-/* Thumbnails Strip */
-.thumbnails-strip {
+  background: #0F172A;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
   display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 4px;
+  align-items: center;
+  justify-content: center;
 }
 
-.thumb-strip-item {
-  width: 98px;
-  height: 66px;
-  border-radius: 10px;
-  border: 1.5px solid #E5E7EB;
-  overflow: hidden;
-  cursor: pointer;
-  box-sizing: border-box;
-  transition: all 0.15s ease;
-  background: #FFFFFF;
-}
-
-.thumb-strip-item.active {
-  border: 2px solid #4F46E5;
-  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.2);
-}
-
-.thumb-mini-art {
-  position: relative;
+.preview-img {
   width: 100%;
   height: 100%;
+  max-height: 700px;
+  object-fit: contain;
+  display: block;
 }
 
 /* Right Column: Cards */

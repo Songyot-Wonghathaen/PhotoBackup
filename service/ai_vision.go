@@ -92,11 +92,19 @@ type geminiVisionService struct {
 
 func quotaCachePath() string {
 	cwd, err := os.Getwd()
-	if err == nil {
+	if err == nil && cwd != "/" && cwd != "\\" {
 		p := filepath.Join(cwd, "database", "ai_model_quota.json")
 		if _, statErr := os.Stat(filepath.Dir(p)); statErr == nil {
 			return p
 		}
+		if mkErr := os.MkdirAll(filepath.Dir(p), 0755); mkErr == nil {
+			return p
+		}
+	}
+	if cfgDir, cfgErr := os.UserConfigDir(); cfgErr == nil {
+		appDir := filepath.Join(cfgDir, "PhotoVault", "database")
+		_ = os.MkdirAll(appDir, 0755)
+		return filepath.Join(appDir, "ai_model_quota.json")
 	}
 	return "database/ai_model_quota.json"
 }

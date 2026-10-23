@@ -1233,6 +1233,15 @@ func (s *BackupService) ResetAiQuotaCooldowns() (*dto.AppSettingsDTO, error) {
 	return cfg.ResetQuotaCooldowns()
 }
 
+// RestoreDefaultProjects restores the 10 built-in default projects and API keys
+func (s *BackupService) RestoreDefaultProjects() (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.RestoreDefaultProjects()
+}
+
 func safeEventsEmit(ctx context.Context, eventName string, data ...interface{}) {
 	if ctx == nil {
 		return

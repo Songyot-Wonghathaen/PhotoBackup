@@ -249,6 +249,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useBackup } from '~/composables/useBackup'
+import { useGalleryState } from '~/composables/useGalleryState'
 import { usePhotoApi, toGalleryCard, toTagCloudItems } from '~/composables/usePhotoApi'
 import type { GalleryCard, TagCloudItem } from '~/composables/usePhotoApi'
 

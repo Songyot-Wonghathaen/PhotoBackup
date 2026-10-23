@@ -94,6 +94,10 @@ export function ResetAiQuotaCooldowns() {
   return window['go']['main']['App']['ResetAiQuotaCooldowns']();
 }
 
+export function RestoreDefaultProjects() {
+  return window['go']['main']['App']['RestoreDefaultProjects']();
+}
+
 export function SaveProjectApiKey(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['SaveProjectApiKey'](arg1, arg2, arg3, arg4);
 }

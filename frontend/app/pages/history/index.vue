@@ -541,7 +541,8 @@ onMounted(() => {
 .history-view {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  height: 100%;
+  max-height: 100%;
   padding: 24px 32px 32px 32px;
   box-sizing: border-box;
   background-color: #F4F5FA;
@@ -961,23 +962,30 @@ onMounted(() => {
   background: #FFFFFF;
   border: 1px solid #E5E7EB;
   border-radius: 14px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 560px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.02);
 }
 
 .history-table {
   width: 100%;
+  min-width: 820px;
   border-collapse: collapse;
   text-align: left;
 }
 
 .history-table th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   padding: 14px 20px;
   font-size: 12.5px;
   font-weight: 600;
   color: #6B7280;
   border-bottom: 1px solid #E5E7EB;
   background: #FAFAFA;
+  box-shadow: 0 1px 0 #E5E7EB;
 }
 
 .history-table td {

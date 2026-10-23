@@ -16,6 +16,8 @@ export function CleanAll():Promise<void>;
 
 export function Delete(arg1:Array<string>,arg2:boolean):Promise<number>;
 
+export function DeleteFromDest(arg1:string,arg2:Array<string>,arg3:boolean):Promise<number>;
+
 export function DeleteProjectApiKey(arg1:string):Promise<dto.AppSettingsDTO>;
 
 export function GetAppSettings():Promise<dto.AppSettingsDTO>;
@@ -25,6 +27,8 @@ export function GetDest():Promise<string>;
 export function GetSource():Promise<string>;
 
 export function GetTagsWithCount(arg1:string):Promise<Array<dto.TagCount>>;
+
+export function ListAllDB(arg1:string):Promise<Array<model.Photo>>;
 
 export function ListDB(arg1:string):Promise<Array<model.Photo>>;
 

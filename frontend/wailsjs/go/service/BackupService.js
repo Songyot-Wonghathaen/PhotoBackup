@@ -22,6 +22,10 @@ export function Delete(arg1, arg2) {
   return window['go']['service']['BackupService']['Delete'](arg1, arg2);
 }
 
+export function DeleteFromDest(arg1, arg2, arg3) {
+  return window['go']['service']['BackupService']['DeleteFromDest'](arg1, arg2, arg3);
+}
+
 export function DeleteProjectApiKey(arg1) {
   return window['go']['service']['BackupService']['DeleteProjectApiKey'](arg1);
 }

@@ -899,6 +899,8 @@ func (s *BackupService) CheckIntegrity(destPath string) (IntegrityResult, error)
 	}
 
 	var missingInDisk []string
+	var toActive []string
+	var toMissing []string
 	matched := 0
 
 	for _, p := range allPhotos {
@@ -909,14 +911,22 @@ func (s *BackupService) CheckIntegrity(destPath string) (IntegrityResult, error)
 		if diskMap[strings.ToLower(p.FileName)] {
 			matched++
 			if p.Status == "missing" {
-				// File restored to disk: mark active again in DB
-				_ = s.photoRepo.MarkPhotoActive(s.getCtx(), destPath, p.FileName)
+				toActive = append(toActive, p.FileName)
 			}
 		} else {
 			missingInDisk = append(missingInDisk, p.FileName)
-			// Update status in DB to 'missing'
-			_ = s.photoRepo.MarkPhotoMissing(s.getCtx(), destPath, p.FileName)
+			if p.Status != "missing" {
+				toMissing = append(toMissing, p.FileName)
+			}
 		}
+	}
+
+	// High Performance: Atomic Batch Status Synchronization in SQLite
+	if len(toActive) > 0 {
+		_ = s.photoRepo.MarkPhotosActiveInBatch(s.getCtx(), destPath, toActive)
+	}
+	if len(toMissing) > 0 {
+		_ = s.photoRepo.MarkPhotosMissingInBatch(s.getCtx(), destPath, toMissing)
 	}
 
 	duration := time.Since(start)
@@ -948,6 +958,7 @@ func (s *BackupService) Delete(targets []string, isAll bool) (int, error) {
 }
 
 // DeleteFromDest removes files from the given destination disk and sets status = 'deleted' in DB (Feature 23 & 25)
+// Uses Concurrency Worker Pool (16 goroutines) for parallel disk deletion and atomic batch status update in DB.
 func (s *BackupService) DeleteFromDest(destPath string, targets []string, isAll bool) (int, error) {
 	if destPath == "" {
 		destPath = s.GetDest()
@@ -956,34 +967,67 @@ func (s *BackupService) DeleteFromDest(destPath string, targets []string, isAll 
 		return 0, errors.New("destination is not set! Please set destination directory first")
 	}
 
-	deletedCount := 0
-
 	if isAll {
 		diskFiles, _ := listDirectoryFiles(destPath)
+		var deletedCount atomic.Int64
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 16)
+
 		for _, f := range diskFiles {
-			p := filepath.Join(destPath, f)
-			if err := os.Remove(p); err == nil {
-				deletedCount++
-			}
+			wg.Add(1)
+			go func(fileName string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				p := filepath.Join(destPath, fileName)
+				if err := os.Remove(p); err == nil {
+					deletedCount.Add(1)
+				}
+			}(f)
 		}
+		wg.Wait()
+
 		// Soft-delete in DB (update status = 'deleted' to preserve history)
 		_, _ = s.photoRepo.MarkAllPhotosDeleted(s.getCtx(), destPath)
-		return deletedCount, nil
+		return int(deletedCount.Load()), nil
 	}
 
+	// Filter valid non-empty targets
+	var validTargets []string
 	for _, fname := range targets {
 		fname = strings.TrimSpace(fname)
-		if fname == "" {
-			continue
+		if fname != "" {
+			validTargets = append(validTargets, fname)
 		}
-		p := filepath.Join(destPath, fname)
-		if err := os.Remove(p); err == nil {
-			deletedCount++
-		}
-		_, _ = s.photoRepo.MarkPhotoDeleted(s.getCtx(), destPath, fname)
 	}
 
-	return deletedCount, nil
+	if len(validTargets) == 0 {
+		return 0, nil
+	}
+
+	var deletedCount atomic.Int64
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 16)
+
+	for _, fname := range validTargets {
+		wg.Add(1)
+		go func(fileName string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			p := filepath.Join(destPath, fileName)
+			if err := os.Remove(p); err == nil {
+				deletedCount.Add(1)
+			}
+		}(fname)
+	}
+	wg.Wait()
+
+	// Atomic batch update status = 'deleted' in DB
+	_, _ = s.photoRepo.MarkPhotosDeletedInBatch(s.getCtx(), destPath, validTargets)
+	return int(deletedCount.Load()), nil
 }
 
 

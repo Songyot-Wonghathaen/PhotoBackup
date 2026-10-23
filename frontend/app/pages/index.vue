@@ -293,13 +293,14 @@
         </span>
         <button
           class="status-pill pill-ai clickable"
-          @click="showAiResultsModal = true"
+          @click="handleOpenAiResults"
           title="คลิกเพื่อดูคำอธิบายและ Tag จาก AI ทั้งหมด"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
           </svg>
-          AI วิเคราะห์ {{ lastSummary.moved_files }}/{{ lastSummary.moved_files }} (คลิกดูคำอธิบาย & Tag)
+          <span v-if="isAnalyzing">กำลังวิเคราะห์ AI {{ aiProgress.current }}/{{ aiProgress.total || lastSummary.moved_files }} (คลิกดูสด)</span>
+          <span v-else>AI วิเคราะห์ {{ aiProgress.current || lastSummary.moved_files }}/{{ aiProgress.total || lastSummary.moved_files }} (คลิกดูคำอธิบาย & Tag)</span>
         </button>
       </div>
 
@@ -470,7 +471,7 @@
             <span class="modal-icon">🤖</span>
             <div>
               <h3>ผลการวิเคราะห์ภาพด้วย AI (Gemini Flash)</h3>
-              <p class="modal-subtitle">บันทึกคำอธิบายและแท็กลง SQLite แล้ว (พบ {{ analyzedPhotosList.length }} ภาพ)</p>
+              <p class="modal-subtitle">บันทึกคำอธิบายและแท็กลง SQLite แล้ว (สำเร็จ {{ analyzedPhotosList.filter(p => !!p.description).length }}/{{ analyzedPhotosList.length }} ภาพ)</p>
             </div>
           </div>
           <button class="btn-close" @click="showAiResultsModal = false">✕</button>
@@ -486,7 +487,7 @@
               </div>
               <div class="ai-card-desc">
                 <span class="ai-label">คำอธิบายจาก AI:</span>
-                <p class="ai-desc-text">{{ item.description || '(ไม่มีคำอธิบาย - ข้ามตามเงื่อนไขข้อ 14)' }}</p>
+                <p class="ai-desc-text">{{ item.description || (isAnalyzing ? 'กำลังรอคิววิเคราะห์ AI...' : '(ไม่มีคำอธิบาย - ข้ามตามเงื่อนไขข้อ 14)') }}</p>
               </div>
               <div class="ai-card-tags" v-if="item.tags && item.tags.length > 0">
                 <span class="ai-label">Tags:</span>
@@ -616,7 +617,9 @@ const {
   listDestFiles,
   moveSelectedPhotos,
   moveAllPhotos,
-  initBackupState
+  initBackupState,
+  stopLiveTimer,
+  fetchDbPhotos
 } = useBackup()
 
 // Sync props if provided
@@ -631,6 +634,10 @@ watch(sourcePath, (newVal) => emit('update:source', newVal))
 watch(destPath, (newVal) => emit('update:dest', newVal))
 
 // Action bridges for template buttons
+function handleOpenAiResults() {
+  fetchDbPhotos()
+  showAiResultsModal.value = true
+}
 function handleSelectSource() {
   selectSourceFolder(folderInputRef.value)
 }
@@ -657,6 +664,7 @@ function handleCancelAnalysis() {
     if (typeof (window as any)?.go?.main?.App?.CancelAnalysis === 'function') {
       (window as any).go.main.App.CancelAnalysis()
     }
+    stopLiveTimer()
     isAnalyzing.value = false
     aiProgress.value = { current: 0, total: 0, filename: '' }
   }

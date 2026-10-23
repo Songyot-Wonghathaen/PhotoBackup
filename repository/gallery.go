@@ -177,7 +177,7 @@ func (r *galleryRepository) Search(ctx context.Context, dest string, params dto.
 
 	photos, err := applyFilters(p.WithContext(ctx)).
 		Preload(p.PhotoTags.Tag).
-		Order(p.BackedUpAt.Desc(), p.ID.Desc()).
+		Order(field.NewUnsafeFieldRaw("CASE WHEN photos.description != '' THEN 0 ELSE 1 END ASC"), p.BackedUpAt.Desc(), p.ID.Desc()).
 		Limit(pageSize).
 		Offset((page - 1) * pageSize).
 		Find()
@@ -195,12 +195,19 @@ func (r *galleryRepository) Search(ctx context.Context, dest string, params dto.
 		totalPages = int((total + int64(pageSize) - 1) / int64(pageSize))
 	}
 
+	analyzedTotal, _ := p.WithContext(ctx).
+		Where(p.DestinationPath.In(conds...)).
+		Where(p.Status.Eq("active")).
+		Where(p.Description.Neq("")).
+		Count()
+
 	return &dto.SearchResult{
-		Items:      items,
-		Total:      total,
-		Page:       page,
-		PageSize:   pageSize,
-		TotalPages: totalPages,
+		Items:         items,
+		Total:         total,
+		AnalyzedTotal: analyzedTotal,
+		Page:          page,
+		PageSize:      pageSize,
+		TotalPages:    totalPages,
 	}, nil
 }
 
@@ -239,6 +246,7 @@ func (r *galleryRepository) TagCloud(ctx context.Context, dest string, limit int
 	defer rows.Close()
 
 	items := make([]dto.TagItem, 0)
+	seenNameIndex := make(map[string]int)
 	for rows.Next() {
 		var id int32
 		var name string
@@ -246,7 +254,17 @@ func (r *galleryRepository) TagCloud(ctx context.Context, dest string, limit int
 		if err := rows.Scan(&id, &name, &count); err != nil {
 			return nil, err
 		}
-		items = append(items, dto.TagItem{ID: id, Name: name, Count: int(count)})
+		cleanName := strings.TrimSpace(name)
+		if cleanName == "" {
+			continue
+		}
+		lower := strings.ToLower(cleanName)
+		if idx, exists := seenNameIndex[lower]; exists {
+			items[idx].Count += int(count)
+			continue
+		}
+		seenNameIndex[lower] = len(items)
+		items = append(items, dto.TagItem{ID: id, Name: cleanName, Count: int(count)})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

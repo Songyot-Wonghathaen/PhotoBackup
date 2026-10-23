@@ -21,11 +21,12 @@ type PhotoListItem struct {
 
 // SearchResult contains a page of photo cards plus paging metadata
 type SearchResult struct {
-	Items      []PhotoListItem `json:"items"`
-	Total      int64           `json:"total"`
-	Page       int             `json:"page"`
-	PageSize   int             `json:"page_size"`
-	TotalPages int             `json:"total_pages"`
+	Items         []PhotoListItem `json:"items"`
+	Total         int64           `json:"total"`
+	AnalyzedTotal int64           `json:"analyzed_total"`
+	Page          int             `json:"page"`
+	PageSize      int             `json:"page_size"`
+	TotalPages    int             `json:"total_pages"`
 }
 
 // TagCount represents a tag name with its photo count

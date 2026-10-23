@@ -51,7 +51,7 @@
             <div v-for="thumb in strip" :key="thumb.id" class="thumb-strip-item"
               :class="{ active: thumb.id === photoId }" @click="selectPhoto(thumb.id)">
               <div class="thumb-mini-art">
-                <img :src="thumbUrl(thumb.id)" class="thumb-mini-img" alt="" loading="lazy" />
+                <img :src="thumb.thumb_url || thumbUrl(thumb.id)" class="thumb-mini-img" alt="" loading="lazy" />
               </div>
             </div>
             <span v-if="strip.length === 0 && !photoApi.loading" class="strip-empty">ไม่มีรูปภาพอื่นในโฟลเดอร์นี้</span>
@@ -224,7 +224,11 @@ const isSavingDesc = ref(false)
 
 // Real image loading with fallback to the gradient art
 const previewFailed = ref(false)
-const previewUrl = computed(() => (photo.value ? imageUrl(photo.value.id) : ''))
+const previewBase64 = ref('')
+const previewUrl = computed(() => {
+  if (previewBase64.value) return previewBase64.value
+  return photo.value ? (photo.value.thumb_url || imageUrl(photo.value.id)) : ''
+})
 
 // Tag editing with autocomplete (Feature 19)
 const isAddingTag = ref(false)
@@ -237,6 +241,19 @@ async function loadDetail() {
   if (detail) {
     photo.value = detail
     previewFailed.value = false
+    previewBase64.value = ''
+    const getThumbFn = (window as any)?.go?.main?.App?.GetThumbnailBase64
+    if (detail.full_path && typeof getThumbFn === 'function') {
+      try {
+        const b64 = await getThumbFn(detail.full_path)
+        if (b64) {
+          previewBase64.value = b64
+          previewFailed.value = false
+        }
+      } catch {
+        // ignore
+      }
+    }
   }
 }
 
@@ -244,7 +261,21 @@ async function loadDetail() {
 async function loadStrip() {
   if (!destPath.value) return
   const result = await photoApi.searchPhotos(destPath.value, { query: '', tag_ids: [], page: 1, page_size: 8 })
-  if (result) strip.value = result.items || []
+  if (result) {
+    strip.value = result.items || []
+    const getThumbFn = (window as any)?.go?.main?.App?.GetThumbnailBase64
+    if (typeof getThumbFn === 'function') {
+      for (const item of strip.value) {
+        if (!item.full_path) continue
+        try {
+          const b64 = await getThumbFn(item.full_path)
+          if (b64) item.thumb_url = b64
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
 }
 
 function selectPhoto(id: number) {

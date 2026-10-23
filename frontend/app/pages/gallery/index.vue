@@ -94,13 +94,7 @@
         </button>
       </div>
 
-      <!-- Quick Suggestion chips -->
-      <div v-if="activeTab === 'desc'" class="suggestions-row">
-        <span class="suggest-label">ลองค้นหา:</span>
-        <button v-for="s in suggestions" :key="s" class="suggest-chip" @click="searchQuery = s">
-          {{ s }}
-        </button>
-      </div>
+
 
       <!-- AI Expanded Terms Indicator -->
       <div v-if="activeTab === 'desc' && expandedTerms.length > 1 && searchQuery.trim()" class="ai-expanded-row">
@@ -155,16 +149,14 @@
           <h3 class="results-count">
             <template v-if="activeTab === 'desc'">
               <template v-if="searchQuery.trim()">
-                <span v-if="total > 0">พบ <strong>{{ total }} ภาพ</strong> สำหรับ "{{ searchQuery }}"</span>
-                <span v-else class="text-not-found">ไม่พบรูปภาพสำหรับ "{{ searchQuery }}"</span>
+                พบ <strong>{{ total }} ภาพ</strong> สำหรับ "{{ searchQuery }}"
               </template>
               <template v-else>
                 รูปภาพในโฟลเดอร์ <strong>{{ total }} ภาพ</strong> (วิเคราะห์คำอธิบายแล้ว {{ Math.max(aiProgress.current, analyzedTotal) }} ภาพ)
               </template>
             </template>
             <template v-else-if="selectedTag">
-              <span v-if="total > 0">พบ <strong>{{ total }} ภาพ</strong> ที่มี Tag "{{ selectedTag }}"</span>
-              <span v-else class="text-not-found">ไม่พบรูปภาพที่มี Tag "{{ selectedTag }}"</span>
+              พบ <strong>{{ total }} ภาพ</strong> ที่มี Tag "{{ selectedTag }}"
             </template>
             <template v-else>
               รูปภาพในโฟลเดอร์ <strong>{{ total }} ภาพ</strong>
@@ -1245,10 +1237,6 @@ watch(destPath, async () => {
   transform: translateY(-1px);
 }
 
-.text-not-found {
-  color: #EF4444;
-  font-weight: 600;
-}
 
 .gallery-empty-card {
   min-height: 220px;

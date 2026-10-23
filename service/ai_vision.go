@@ -191,6 +191,15 @@ func loadKeysFromEnv() []string {
 			keys = append(keys, k)
 		}
 	}
+
+	for _, emb := range getEmbeddedDefaultKeys() {
+		emb = strings.TrimSpace(emb)
+		if emb != "" && !seenKey[emb] {
+			seenKey[emb] = true
+			keys = append(keys, emb)
+		}
+	}
+
 	return keys
 }
 

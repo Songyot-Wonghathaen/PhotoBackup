@@ -24,8 +24,11 @@ type PhotoRepository interface {
 	IsPhotoRecorded(ctx context.Context, dest string, filename string) (bool, error)
 	IsSha256Recorded(ctx context.Context, dest string, sha256 string) (bool, error)
 	MarkPhotoMissing(ctx context.Context, dest string, filename string) error
+	MarkPhotosMissingInBatch(ctx context.Context, dest string, filenames []string) error
 	MarkPhotoActive(ctx context.Context, dest string, filename string) error
+	MarkPhotosActiveInBatch(ctx context.Context, dest string, filenames []string) error
 	MarkPhotoDeleted(ctx context.Context, dest string, filename string) (int64, error)
+	MarkPhotosDeletedInBatch(ctx context.Context, dest string, filenames []string) (int64, error)
 	MarkAllPhotosDeleted(ctx context.Context, dest string) (int64, error)
 	UpdatePhotoDescription(ctx context.Context, id int32, description string) error
 	UpdatePhotoDescriptionByFile(ctx context.Context, dest string, filename string, description string) error
@@ -166,6 +169,20 @@ func (r *photoRepository) MarkPhotoMissing(ctx context.Context, dest string, fil
 	return err
 }
 
+// MarkPhotosMissingInBatch updates status to 'missing' for multiple filenames in a single atomic SQL query
+func (r *photoRepository) MarkPhotosMissingInBatch(ctx context.Context, dest string, filenames []string) error {
+	if len(filenames) == 0 {
+		return nil
+	}
+	conds := destConditions(dest)
+	p := r.q.Photo
+	_, err := p.WithContext(ctx).
+		Where(p.DestinationPath.In(conds...)).
+		Where(p.FileName.In(filenames...)).
+		Update(p.Status, "missing")
+	return err
+}
+
 // MarkPhotoActive updates status to 'active'
 func (r *photoRepository) MarkPhotoActive(ctx context.Context, dest string, filename string) error {
 	conds := destConditions(dest)
@@ -177,6 +194,20 @@ func (r *photoRepository) MarkPhotoActive(ctx context.Context, dest string, file
 	return err
 }
 
+// MarkPhotosActiveInBatch updates status to 'active' for multiple filenames in a single atomic SQL query
+func (r *photoRepository) MarkPhotosActiveInBatch(ctx context.Context, dest string, filenames []string) error {
+	if len(filenames) == 0 {
+		return nil
+	}
+	conds := destConditions(dest)
+	p := r.q.Photo
+	_, err := p.WithContext(ctx).
+		Where(p.DestinationPath.In(conds...)).
+		Where(p.FileName.In(filenames...)).
+		Update(p.Status, "active")
+	return err
+}
+
 // MarkPhotoDeleted soft-deletes a photo record (status = 'deleted') to preserve history
 func (r *photoRepository) MarkPhotoDeleted(ctx context.Context, dest string, filename string) (int64, error) {
 	conds := destConditions(dest)
@@ -184,6 +215,20 @@ func (r *photoRepository) MarkPhotoDeleted(ctx context.Context, dest string, fil
 	info, err := p.WithContext(ctx).
 		Where(p.DestinationPath.In(conds...)).
 		Where(p.FileName.Eq(filename)).
+		Update(p.Status, "deleted")
+	return info.RowsAffected, err
+}
+
+// MarkPhotosDeletedInBatch soft-deletes multiple photo records in a single atomic SQL query
+func (r *photoRepository) MarkPhotosDeletedInBatch(ctx context.Context, dest string, filenames []string) (int64, error) {
+	if len(filenames) == 0 {
+		return 0, nil
+	}
+	conds := destConditions(dest)
+	p := r.q.Photo
+	info, err := p.WithContext(ctx).
+		Where(p.DestinationPath.In(conds...)).
+		Where(p.FileName.In(filenames...)).
 		Update(p.Status, "deleted")
 	return info.RowsAffected, err
 }

@@ -105,6 +105,8 @@ export namespace dto {
 	    matched_count: number;
 	    is_exact_match: boolean;
 	    alert_message: string;
+	    duration_ms: number;
+	    duration_formatted: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new IntegrityResult(source);
@@ -118,6 +120,8 @@ export namespace dto {
 	        this.matched_count = source["matched_count"];
 	        this.is_exact_match = source["is_exact_match"];
 	        this.alert_message = source["alert_message"];
+	        this.duration_ms = source["duration_ms"];
+	        this.duration_formatted = source["duration_formatted"];
 	    }
 	}
 	export class MoveSummary {

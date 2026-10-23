@@ -183,29 +183,29 @@
           <button 
             class="btn-tool btn-primary-light" 
             @click="handleBackupSelected"
-            :disabled="selectedFiles.length === 0 || isProcessing"
-            title="คัดลอกรูปภาพที่เลือกไปยังปลายทาง (เก็บไฟล์ต้นทางไว้)"
+            :disabled="selectedFiles.length === 0"
+            :title="activeQueueItem ? 'เพิ่มรูปภาพที่เลือกเข้าคิวสำรองต่อจากงานปัจจุบัน' : 'คัดลอกรูปภาพที่เลือกไปยังปลายทาง (เก็บไฟล์ต้นทางไว้)'"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="17 8 12 3 7 8"/>
               <line x1="12" y1="3" x2="12" y2="15"/>
             </svg>
-            สำรองที่เลือก ({{ selectedFiles.length }})
+            {{ activeQueueItem ? `+ เข้าคิวสำรอง (${selectedFiles.length})` : `สำรองที่เลือก (${selectedFiles.length})` }}
           </button>
 
           <button 
             class="btn-tool btn-primary-solid" 
             @click="handleBackupAll"
-            :disabled="sourceFiles.length === 0 || isProcessing"
-            title="คัดลอกรูปภาพทั้งหมดไปยังปลายทาง (เก็บไฟล์ต้นทางไว้)"
+            :disabled="sourceFiles.length === 0"
+            :title="activeQueueItem ? 'เพิ่มรูปภาพทั้งหมดเข้าคิวสำรองต่อจากงานปัจจุบัน' : 'คัดลอกรูปภาพทั้งหมดไปยังปลายทาง (เก็บไฟล์ต้นทางไว้)'"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="17 8 12 3 7 8"/>
               <line x1="12" y1="3" x2="12" y2="15"/>
             </svg>
-            สำรองทั้งหมด
+            {{ activeQueueItem ? '+ เข้าคิวสำรองทั้งหมด' : 'สำรองทั้งหมด' }}
           </button>
 
           <div class="btn-divider"></div>
@@ -214,29 +214,44 @@
           <button 
             class="btn-tool btn-amber-light" 
             @click="handleMoveSelected"
-            :disabled="selectedFiles.length === 0 || isProcessing"
-            title="ย้ายรูปภาพที่เลือกไปยังปลายทาง (ไฟล์ต้นทางจะถูกลบออก)"
+            :disabled="selectedFiles.length === 0"
+            :title="activeQueueItem ? 'เพิ่มรูปภาพที่เลือกเข้าคิวย้ายต่อจากงานปัจจุบัน' : 'ย้ายรูปภาพที่เลือกไปยังปลายทาง (ไฟล์ต้นทางจะถูกลบออก)'"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M5 12h14"/>
               <path d="m12 5 7 7-7 7"/>
             </svg>
-            ย้ายที่เลือก ({{ selectedFiles.length }})
+            {{ activeQueueItem ? `+ เข้าคิวย้าย (${selectedFiles.length})` : `ย้ายที่เลือก (${selectedFiles.length})` }}
           </button>
 
           <button 
             class="btn-tool btn-amber-solid" 
             @click="handleMoveAll"
-            :disabled="sourceFiles.length === 0 || isProcessing"
-            title="ย้ายรูปภาพทั้งหมดไปยังปลายทาง (ไฟล์ต้นทางจะถูกลบออก)"
+            :disabled="sourceFiles.length === 0"
+            :title="activeQueueItem ? 'เพิ่มรูปภาพทั้งหมดเข้าคิวย้ายต่อจากงานปัจจุบัน' : 'ย้ายรูปภาพทั้งหมดไปยังปลายทาง (ไฟล์ต้นทางจะถูกลบออก)'"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M5 12h14"/>
               <path d="m12 5 7 7-7 7"/>
             </svg>
-            ย้ายทั้งหมด
+            {{ activeQueueItem ? '+ เข้าคิวย้ายทั้งหมด' : 'ย้ายทั้งหมด' }}
           </button>
         </div>
+      </div>
+
+      <!-- Sequential FIFO Queue Banner -->
+      <div v-if="backupQueue.length > 0" class="queue-status-banner">
+        <div class="queue-banner-left">
+          <span class="queue-pulse-dot"></span>
+          <span class="queue-title">กำลังประมวลผลตามคิว ({{ backupQueue.length }} งาน):</span>
+          <span class="queue-current-item">
+            {{ activeQueueItem ? activeQueueItem.name : 'กำลังประมวลผล...' }}
+          </span>
+          <span v-if="backupQueue.length > 1" class="queue-waiting-badge">
+            + อีก {{ backupQueue.length - 1 }} คิวรอทำต่อ
+          </span>
+        </div>
+        <div class="queue-banner-tag">เรียงตามคิว ไม่ลัดคิว (FIFO)</div>
       </div>
 
       <!-- Photo Grid Cards -->
@@ -638,6 +653,8 @@ const {
   aiError,
   integrityResult,
   lastSummary,
+  backupQueue,
+  activeQueueItem,
   sourceTotalBytes,
   displayMissingPreview,
   allSelected,
@@ -1136,6 +1153,79 @@ onMounted(() => {
 .btn-tool:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Sequential FIFO Queue Banner */
+.queue-status-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #F0FDF4;
+  border: 1px solid #BBF7D0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: #166534;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.queue-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.queue-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #22C55E;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+  animation: pulse-green 1.5s infinite;
+}
+
+@keyframes pulse-green {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+}
+
+.queue-title {
+  font-weight: 600;
+}
+
+.queue-current-item {
+  color: #15803D;
+  font-weight: 600;
+}
+
+.queue-waiting-badge {
+  background: #DCFCE7;
+  color: #166534;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.queue-banner-tag {
+  font-size: 11px;
+  color: #15803D;
+  background: #FFFFFF;
+  border: 1px solid #86EFAC;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-weight: 600;
 }
 
 /* Photo Grid */

@@ -26,6 +26,23 @@ const aiProgress = ref({ current: 0, total: 0, filename: '' })
 const aiError = ref<string | null>(null)
 const analyzedPhotosList = ref<Array<{ filename: string; description: string; tags: string[]; path?: string }>>([])
 
+export interface BackupQueueItem {
+  id: string
+  name: string
+  type: 'backup' | 'move'
+  targets: string[]
+  isAll: boolean
+  totalCount: number
+  status: 'waiting' | 'running' | 'completed' | 'failed'
+  createdAt: number
+}
+
+// FIFO Queue State: Ensures subsequent backups/moves wait until the current one finishes
+const backupQueue = ref<BackupQueueItem[]>([])
+const activeQueueItem = ref<BackupQueueItem | null>(null)
+let queueWorkerRunning = false
+let resolveCurrentBatchAi: (() => void) | null = null
+
 // Fallback timer: closes the AI popup if no progress event arrives within 3 minutes
 let aiTimeoutHandle: ReturnType<typeof setTimeout> | null = null
 
@@ -291,7 +308,127 @@ export function useBackup() {
     }
   }
 
-  // Helper for both Backup (Copy) and Move (Cut)
+  // Sequential Queue Runner: processes items in strict FIFO order
+  async function runQueueWorker() {
+    if (queueWorkerRunning) return
+    queueWorkerRunning = true
+
+    try {
+      while (backupQueue.value.length > 0) {
+        const item = backupQueue.value[0]
+        if (!item) break
+
+        item.status = 'running'
+        activeQueueItem.value = item
+        isProcessing.value = true
+        opStartTime = Date.now()
+
+        const actionName = item.type === 'move' ? 'ย้าย' : 'สำรอง'
+        const isMove = item.type === 'move'
+
+        try {
+          const app = (window as any)?.go?.main?.App
+          let summary: any = null
+
+          if (isMove && typeof app?.MovePhotos === 'function') {
+            summary = await app.MovePhotos(item.targets, item.isAll)
+          } else if (!isMove && typeof app?.BackupPhotos === 'function') {
+            summary = await app.BackupPhotos(item.targets, item.isAll)
+          } else if (typeof app?.MovePhotos === 'function') {
+            summary = await app.MovePhotos(item.targets, item.isAll)
+          }
+
+          if (summary) {
+            lastSummary.value = {
+              total_files: summary.total_files || item.totalCount,
+              moved_files: summary.moved_files || 0,
+              skipped_files: summary.skipped_files || 0,
+              failed_files: summary.failed_files || 0,
+              duration_ms: summary.duration_ms || 0,
+              duration_formatted: summary.duration_formatted || `${summary.duration_ms} ms`,
+              has_run: true
+            }
+
+            // If files were moved/backed up, wait for AI analysis to finish before moving to next queue item!
+            if ((summary.moved_files || 0) > 0) {
+              isAnalyzing.value = true
+              aiProgress.value = { current: 0, total: summary.moved_files || 0, filename: '' }
+              startLiveTimer()
+
+              // Wait until AI analysis of this batch completes so next task never skips the line!
+              await new Promise<void>((resolve) => {
+                let resolved = false
+                const done = () => {
+                  if (!resolved) {
+                    resolved = true
+                    resolveCurrentBatchAi = null
+                    resolve()
+                  }
+                }
+                resolveCurrentBatchAi = done
+
+                // Fallback timeout in case AI auto-analyze is disabled in settings
+                setTimeout(() => {
+                  if (!isAnalyzing.value || aiProgress.value.total === 0) {
+                    done()
+                  }
+                }, 2000)
+              })
+            } else {
+              stopLiveTimer()
+            }
+
+            aiError.value = null
+            await refreshSourceFiles()
+
+            if (typeof app?.CheckIntegrity === 'function') {
+              integrityResult.value = await app.CheckIntegrity(destPath.value)
+              destCount.value = integrityResult.value?.total_disk || 0
+            }
+            await fetchDbPhotos()
+
+            const suffix = isMove ? ' (ลบออกจากต้นทางแล้ว)' : ' (เก็บไฟล์ต้นทางไว้)'
+            const scopeText = item.isAll ? 'ทั้งหมด' : 'ที่เลือก'
+            successMessage.value = `${actionName}รูปภาพ${scopeText}สำเร็จ ${summary.moved_files} ไฟล์${suffix} (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`
+            showSuccessModal.value = true
+          } else {
+            // Browser preview fallback
+            const count = item.totalCount
+            destCount.value += count
+            lastSummary.value = {
+              total_files: count,
+              moved_files: count,
+              skipped_files: 0,
+              failed_files: 0,
+              duration_ms: 18.5,
+              duration_formatted: '18.50 ms',
+              has_run: true
+            }
+            if (isMove) {
+              sourceFiles.value = sourceFiles.value.filter(f => !item.targets.includes(f.filename))
+            }
+            successMessage.value = `จำลองการ${actionName}ไฟล์สำเร็จ ${count} รูป (เวลา ${lastSummary.value.duration_formatted})`
+            showSuccessModal.value = true
+          }
+          item.status = 'completed'
+        } catch (err: any) {
+          item.status = 'failed'
+          const errorMsg = err?.message || String(err)
+          aiError.value = errorMsg
+          alert(`เกิดข้อผิดพลาดในการ${actionName}: ` + errorMsg)
+        } finally {
+          // Remove completed/failed item from queue
+          backupQueue.value.shift()
+        }
+      }
+    } finally {
+      activeQueueItem.value = null
+      isProcessing.value = false
+      queueWorkerRunning = false
+    }
+  }
+
+  // Helper for both Backup (Copy) and Move (Cut) - Queues work in FIFO order
   async function executeTransfer(isMove: boolean, isAll: boolean) {
     const actionName = isMove ? 'ย้าย' : 'สำรอง'
     if (!sourcePath.value) {
@@ -318,78 +455,27 @@ export function useBackup() {
       }
     }
 
-    isProcessing.value = true
-    opStartTime = Date.now()
-    try {
-      const app = (window as any)?.go?.main?.App
-      const targets = isAll ? [] : selectedFiles.value
-      
-      let summary: any = null
-      if (isMove && typeof app?.MovePhotos === 'function') {
-        summary = await app.MovePhotos(targets, isAll)
-      } else if (!isMove && typeof app?.BackupPhotos === 'function') {
-        summary = await app.BackupPhotos(targets, isAll)
-      } else if (typeof app?.MovePhotos === 'function') {
-        summary = await app.MovePhotos(targets, isAll)
-      }
+    // Capture selected files and clear selection immediately so user can select more photos!
+    const targetsToRun = isAll ? [] : [...selectedFiles.value]
+    const count = isAll ? sourceFiles.value.length : targetsToRun.length
+    selectedFiles.value = []
 
-      if (summary) {
-        lastSummary.value = {
-          total_files: summary.total_files || (isAll ? sourceFiles.value.length : selectedFiles.value.length),
-          moved_files: summary.moved_files || 0,
-          skipped_files: summary.skipped_files || 0,
-          failed_files: summary.failed_files || 0,
-          duration_ms: summary.duration_ms || 0,
-          duration_formatted: summary.duration_formatted || `${summary.duration_ms} ms`,
-          has_run: true
-        }
+    const item: BackupQueueItem = {
+      id: 'task_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      name: isAll ? `${actionName}ทั้งหมด (${count} ไฟล์)` : `${actionName}ที่เลือก (${count} ไฟล์)`,
+      type: isMove ? 'move' : 'backup',
+      targets: targetsToRun,
+      isAll,
+      totalCount: count,
+      status: 'waiting',
+      createdAt: Date.now()
+    }
 
-        if ((summary.moved_files || 0) > 0) {
-          isAnalyzing.value = true
-          aiProgress.value = { current: 0, total: summary.moved_files || 0, filename: '' }
-          startLiveTimer()
-        } else {
-          stopLiveTimer()
-        }
-        aiError.value = null
+    backupQueue.value.push(item)
 
-        await refreshSourceFiles()
-        if (typeof app?.CheckIntegrity === 'function') {
-          integrityResult.value = await app.CheckIntegrity(destPath.value)
-          destCount.value = integrityResult.value?.total_disk || 0
-        }
-        await fetchDbPhotos()
-
-        const suffix = isMove ? ' (ลบออกจากต้นทางแล้ว)' : ' (เก็บไฟล์ต้นทางไว้)'
-        const scopeText = isAll ? 'ทั้งหมด' : 'ที่เลือก'
-        successMessage.value = `${actionName}รูปภาพ${scopeText}สำเร็จ ${summary.moved_files} ไฟล์${suffix} (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`
-        showSuccessModal.value = true
-      } else {
-        // Browser preview fallback
-        const count = isAll ? sourceFiles.value.filter(f => !f.is_duplicate).length : selectedFiles.value.length
-        destCount.value += count
-        lastSummary.value = {
-          total_files: isAll ? sourceFiles.value.length : count,
-          moved_files: count,
-          skipped_files: 0,
-          failed_files: 0,
-          duration_ms: 18.5,
-          duration_formatted: '18.50 ms',
-          has_run: true
-        }
-        if (isMove) {
-          sourceFiles.value = sourceFiles.value.filter(f => isAll ? f.is_duplicate : !selectedFiles.value.includes(f.filename))
-        }
-        selectedFiles.value = []
-        successMessage.value = `จำลองการ${actionName}ไฟล์สำเร็จ ${count} รูป (เวลา ${lastSummary.value.duration_formatted})`
-        showSuccessModal.value = true
-      }
-    } catch (err: any) {
-      const errorMsg = err?.message || String(err)
-      aiError.value = errorMsg
-      alert(`เกิดข้อผิดพลาดในการ${actionName}: ` + errorMsg)
-    } finally {
-      isProcessing.value = false
+    // Trigger queue runner if not already running
+    if (!queueWorkerRunning) {
+      runQueueWorker()
     }
   }
 
@@ -506,8 +592,14 @@ export function useBackup() {
 
         if (isDone) {
           stopLiveTimer()
+          if (resolveCurrentBatchAi) {
+            resolveCurrentBatchAi()
+            resolveCurrentBatchAi = null
+          }
           setTimeout(() => {
-            isAnalyzing.value = false
+            if (!activeQueueItem.value) {
+              isAnalyzing.value = false
+            }
           }, 800)
         } else {
           isAnalyzing.value = true
@@ -525,6 +617,10 @@ export function useBackup() {
         // Close the popup immediately on first error
         clearAiTimeout()
         isAnalyzing.value = false
+        if (resolveCurrentBatchAi) {
+          resolveCurrentBatchAi()
+          resolveCurrentBatchAi = null
+        }
       })
     }
   }
@@ -551,6 +647,8 @@ export function useBackup() {
     analyzedPhotosList,
     integrityResult,
     lastSummary,
+    backupQueue,
+    activeQueueItem,
 
     // Computed
     sourceTotalBytes,

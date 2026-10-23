@@ -59,6 +59,8 @@ type BackupService struct {
 	dest           string
 	mu             sync.RWMutex
 	analyzeCancel  context.CancelFunc
+	transferMu     sync.Mutex
+	aiAnalyzeMu    sync.Mutex
 }
 
 // CancelAnalysis stops any running background AI analysis immediately.
@@ -371,6 +373,9 @@ func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) 
 }
 
 func (s *BackupService) processTransfer(targets []string, isAll bool, deleteSource bool) (MoveSummary, error) {
+	s.transferMu.Lock()
+	defer s.transferMu.Unlock()
+
 	src := s.GetSource()
 	dst := s.GetDest()
 
@@ -584,8 +589,11 @@ func (s *BackupService) processTransfer(targets []string, isAll bool, deleteSour
 	return summary, nil
 }
 
-// analyzeMovedPhotos runs AI vision analysis in the background after Move returns.
+// analyzeMovedPhotos runs AI vision analysis in the background in strict FIFO order (never jumps the queue).
 func (s *BackupService) analyzeMovedPhotos(ctx context.Context, dst string, photos []*modelGen.Photo, ai AiVisionService, tagRepo repository.TagRepository) {
+	s.aiAnalyzeMu.Lock()
+	defer s.aiAnalyzeMu.Unlock()
+
 	defer func() {
 		s.mu.Lock()
 		s.analyzeCancel = nil

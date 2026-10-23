@@ -188,6 +188,67 @@ func TestGallerySearchEscapesWildcards(t *testing.T) {
 	}
 }
 
+// Level 2: AI Query Expansion finds relevant photos even when exact phrase is missing
+func TestGallerySearchAIQueryExpansion(t *testing.T) {
+	svc, db, destDir := seedGallery(t)
+
+	// Add photos: one has normal bread, one has burnt bread, one is unrelated
+	now := time.Now()
+	testPhotos := []*model.Photo{
+		{DestinationPath: destDir, FileName: "toast.jpg", RelPath: "toast.jpg", SizeBytes: 150, Sha256: "h_toast", BackedUpAt: now.Add(-10 * time.Minute), Status: "active", Description: "ขนมปังปิ้งเนยหอมกรุ่น"},
+		{DestinationPath: destDir, FileName: "burnt_bread.jpg", RelPath: "burnt_bread.jpg", SizeBytes: 160, Sha256: "h_burnt", BackedUpAt: now.Add(-20 * time.Minute), Status: "active", Description: "ขนมปังไหม้เกรียมสีดำ"},
+	}
+	if err := db.Create(&testPhotos).Error; err != nil {
+		t.Fatalf("failed to insert test photos: %v", err)
+	}
+
+	// 1. Exact search without expansion for "ขนมปังไหม้" finds only the burnt bread
+	exact, err := svc.SearchPhotos(destDir, dto.SearchParams{
+		Query: "ขนมปังไหม้",
+	})
+	if err != nil {
+		t.Fatalf("exact search failed: %v", err)
+	}
+	if exact.Total != 1 || exact.Items[0].FileName != "burnt_bread.jpg" {
+		t.Fatalf("expected 1 exact match (burnt_bread.jpg), got %d (%+v)", exact.Total, exact.Items)
+	}
+
+	// 2. With AI Query Expansion: user searched "ขนมปังไหม้"
+	// Both burnt bread and normal bread match, with burnt bread ranked #1!
+	expanded, err := svc.SearchPhotos(destDir, dto.SearchParams{
+		Query:         "ขนมปังไหม้",
+		ExpandedTerms: []string{"ขนมปังไหม้", "ขนมปังเกรียม", "ขนมปังปิ้ง", "ขนมปัง", "toast"},
+	})
+	if err != nil {
+		t.Fatalf("expanded search failed: %v", err)
+	}
+	if expanded.Total != 2 {
+		t.Fatalf("expected 2 photos found via AI expansion, got %d", expanded.Total)
+	}
+	// Burnt bread has higher score than normal bread -> must be ranked first!
+	if expanded.Items[0].FileName != "burnt_bread.jpg" {
+		t.Fatalf("expected burnt_bread.jpg to rank #1 due to higher relevance score, got %s", expanded.Items[0].FileName)
+	}
+	if expanded.Items[1].FileName != "toast.jpg" {
+		t.Fatalf("expected toast.jpg to rank #2 as fallback match, got %s", expanded.Items[1].FileName)
+	}
+
+	// 3. Scenario where NO burnt bread exists: delete burnt_bread.jpg
+	_ = db.Where("file_name = ?", "burnt_bread.jpg").Delete(&model.Photo{})
+
+	fallback, err := svc.SearchPhotos(destDir, dto.SearchParams{
+		Query:         "ขนมปังไหม้",
+		ExpandedTerms: []string{"ขนมปังไหม้", "ขนมปังเกรียม", "ขนมปังปิ้ง", "ขนมปัง", "toast"},
+	})
+	if err != nil {
+		t.Fatalf("fallback search failed: %v", err)
+	}
+	// Even though "ขนมปังไหม้" has 0 exact matches, the user STILL gets toast.jpg!
+	if fallback.Total != 1 || fallback.Items[0].FileName != "toast.jpg" {
+		t.Fatalf("expected fallback to find toast.jpg, got total=%d (%+v)", fallback.Total, fallback.Items)
+	}
+}
+
 // Feature 16: Tag Cloud counts active photos per tag, ordered by count DESC, limit respected
 func TestGalleryTagCloud(t *testing.T) {
 	svc, _, destDir := seedGallery(t)

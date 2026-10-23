@@ -6,6 +6,14 @@ export function AnalyzePhoto(arg1) {
   return window['go']['main']['App']['AnalyzePhoto'](arg1);
 }
 
+export function BackupPhotos(arg1, arg2) {
+  return window['go']['main']['App']['BackupPhotos'](arg1, arg2);
+}
+
+export function CancelAnalysis() {
+  return window['go']['main']['App']['CancelAnalysis']();
+}
+
 export function CheckIntegrity(arg1) {
   return window['go']['main']['App']['CheckIntegrity'](arg1);
 }
@@ -14,8 +22,24 @@ export function DeletePhotos(arg1, arg2) {
   return window['go']['main']['App']['DeletePhotos'](arg1, arg2);
 }
 
+export function DeletePhotosFromDest(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DeletePhotosFromDest'](arg1, arg2, arg3);
+}
+
+export function DeleteProjectApiKey(arg1) {
+  return window['go']['main']['App']['DeleteProjectApiKey'](arg1);
+}
+
+export function GetAppSettings() {
+  return window['go']['main']['App']['GetAppSettings']();
+}
+
 export function GetDestPath() {
   return window['go']['main']['App']['GetDestPath']();
+}
+
+export function GetFullPhotoBase64(arg1) {
+  return window['go']['main']['App']['GetFullPhotoBase64'](arg1);
 }
 
 export function GetPhotoThumbnail(arg1) {
@@ -36,6 +60,10 @@ export function GetTagsWithCount(arg1) {
 
 export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
+}
+
+export function ListAllDBPhotos(arg1) {
+  return window['go']['main']['App']['ListAllDBPhotos'](arg1);
 }
 
 export function ListDBPhotos(arg1) {
@@ -62,6 +90,14 @@ export function MovePhotos(arg1, arg2) {
   return window['go']['main']['App']['MovePhotos'](arg1, arg2);
 }
 
+export function ResetAiQuotaCooldowns() {
+  return window['go']['main']['App']['ResetAiQuotaCooldowns']();
+}
+
+export function SaveProjectApiKey(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SaveProjectApiKey'](arg1, arg2, arg3, arg4);
+}
+
 export function SearchPhotosByDescription(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['SearchPhotosByDescription'](arg1, arg2, arg3, arg4);
 }
@@ -84,4 +120,12 @@ export function SetDestPath(arg1) {
 
 export function SetSourcePath(arg1) {
   return window['go']['main']['App']['SetSourcePath'](arg1);
+}
+
+export function ToggleProjectApiKey(arg1, arg2) {
+  return window['go']['main']['App']['ToggleProjectApiKey'](arg1, arg2);
+}
+
+export function UpdateSystemSettings(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['UpdateSystemSettings'](arg1, arg2, arg3, arg4);
 }

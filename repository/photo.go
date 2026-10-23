@@ -6,12 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 
+	"PhotoVault/controller/dto"
 	"PhotoVault/model/model"
 	"PhotoVault/model/query"
 
 	"gorm.io/gen"
 	"gorm.io/gorm"
 )
+
+type TagCount = dto.TagCount
 
 type PhotoRepository interface {
 	GetActivePhotosByDest(ctx context.Context, dest string) ([]*model.Photo, error)
@@ -21,20 +24,20 @@ type PhotoRepository interface {
 	IsPhotoRecorded(ctx context.Context, dest string, filename string) (bool, error)
 	IsSha256Recorded(ctx context.Context, dest string, sha256 string) (bool, error)
 	MarkPhotoMissing(ctx context.Context, dest string, filename string) error
+	MarkPhotosMissingInBatch(ctx context.Context, dest string, filenames []string) error
 	MarkPhotoActive(ctx context.Context, dest string, filename string) error
+	MarkPhotosActiveInBatch(ctx context.Context, dest string, filenames []string) error
 	MarkPhotoDeleted(ctx context.Context, dest string, filename string) (int64, error)
+	MarkPhotosDeletedInBatch(ctx context.Context, dest string, filenames []string) (int64, error)
 	MarkAllPhotosDeleted(ctx context.Context, dest string) (int64, error)
 	UpdatePhotoDescription(ctx context.Context, id int32, description string) error
 	UpdatePhotoDescriptionByFile(ctx context.Context, dest string, filename string, description string) error
+	UpdatePhotoDescriptionsInBatch(ctx context.Context, updates map[int32]string) error
+	FindPhotoByFile(ctx context.Context, dest string, filename string) (*model.Photo, error)
 	CleanPhotos(ctx context.Context) error
 	SearchPhotosByDescription(ctx context.Context, dest string, query string, limit int, offset int) ([]*model.Photo, error)
 	SearchPhotosByTag(ctx context.Context, dest string, tagName string, limit int, offset int) ([]*model.Photo, error)
 	GetTagsWithCount(ctx context.Context, dest string) ([]TagCount, error)
-}
-
-type TagCount struct {
-	Name  string
-	Count int
 }
 
 type photoRepository struct {
@@ -166,6 +169,20 @@ func (r *photoRepository) MarkPhotoMissing(ctx context.Context, dest string, fil
 	return err
 }
 
+// MarkPhotosMissingInBatch updates status to 'missing' for multiple filenames in a single atomic SQL query
+func (r *photoRepository) MarkPhotosMissingInBatch(ctx context.Context, dest string, filenames []string) error {
+	if len(filenames) == 0 {
+		return nil
+	}
+	conds := destConditions(dest)
+	p := r.q.Photo
+	_, err := p.WithContext(ctx).
+		Where(p.DestinationPath.In(conds...)).
+		Where(p.FileName.In(filenames...)).
+		Update(p.Status, "missing")
+	return err
+}
+
 // MarkPhotoActive updates status to 'active'
 func (r *photoRepository) MarkPhotoActive(ctx context.Context, dest string, filename string) error {
 	conds := destConditions(dest)
@@ -177,6 +194,20 @@ func (r *photoRepository) MarkPhotoActive(ctx context.Context, dest string, file
 	return err
 }
 
+// MarkPhotosActiveInBatch updates status to 'active' for multiple filenames in a single atomic SQL query
+func (r *photoRepository) MarkPhotosActiveInBatch(ctx context.Context, dest string, filenames []string) error {
+	if len(filenames) == 0 {
+		return nil
+	}
+	conds := destConditions(dest)
+	p := r.q.Photo
+	_, err := p.WithContext(ctx).
+		Where(p.DestinationPath.In(conds...)).
+		Where(p.FileName.In(filenames...)).
+		Update(p.Status, "active")
+	return err
+}
+
 // MarkPhotoDeleted soft-deletes a photo record (status = 'deleted') to preserve history
 func (r *photoRepository) MarkPhotoDeleted(ctx context.Context, dest string, filename string) (int64, error) {
 	conds := destConditions(dest)
@@ -184,6 +215,20 @@ func (r *photoRepository) MarkPhotoDeleted(ctx context.Context, dest string, fil
 	info, err := p.WithContext(ctx).
 		Where(p.DestinationPath.In(conds...)).
 		Where(p.FileName.Eq(filename)).
+		Update(p.Status, "deleted")
+	return info.RowsAffected, err
+}
+
+// MarkPhotosDeletedInBatch soft-deletes multiple photo records in a single atomic SQL query
+func (r *photoRepository) MarkPhotosDeletedInBatch(ctx context.Context, dest string, filenames []string) (int64, error) {
+	if len(filenames) == 0 {
+		return 0, nil
+	}
+	conds := destConditions(dest)
+	p := r.q.Photo
+	info, err := p.WithContext(ctx).
+		Where(p.DestinationPath.In(conds...)).
+		Where(p.FileName.In(filenames...)).
 		Update(p.Status, "deleted")
 	return info.RowsAffected, err
 }
@@ -215,6 +260,48 @@ func (r *photoRepository) UpdatePhotoDescriptionByFile(ctx context.Context, dest
 		Where(p.FileName.Eq(filename)).
 		Update(p.Description, description)
 	return err
+}
+
+// UpdatePhotoDescriptionsInBatch updates multiple photo descriptions inside a single SQLite transaction
+func (r *photoRepository) UpdatePhotoDescriptionsInBatch(ctx context.Context, updates map[int32]string) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		qTx := query.Use(tx)
+		p := qTx.Photo
+		for id, desc := range updates {
+			if id <= 0 || desc == "" {
+				continue
+			}
+			if _, err := p.WithContext(ctx).Where(p.ID.Eq(id)).Update(p.Description, desc); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// FindPhotoByFile looks up a photo by destination path and filename (or filename only fallback)
+func (r *photoRepository) FindPhotoByFile(ctx context.Context, dest string, filename string) (*model.Photo, error) {
+	p := r.q.Photo
+	if dest != "" {
+		conds := destConditions(dest)
+		if len(conds) > 0 {
+			photo, err := p.WithContext(ctx).
+				Where(p.DestinationPath.In(conds...)).
+				Where(p.FileName.Eq(filename)).
+				Order(p.ID.Desc()).
+				First()
+			if err == nil && photo != nil {
+				return photo, nil
+			}
+		}
+	}
+	return p.WithContext(ctx).
+		Where(p.FileName.Eq(filename)).
+		Order(p.ID.Desc()).
+		First()
 }
 
 // CleanPhotos truncates/cleans the photos table

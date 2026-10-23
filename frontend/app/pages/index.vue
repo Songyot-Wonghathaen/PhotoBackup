@@ -1,10 +1,11 @@
 <template>
   <div class="backup-view">
+    <div class="backup-scroll-area">
     <!-- Header -->
     <header class="view-header">
       <div class="header-text">
         <h1 class="view-title">สำรองรูปภาพ</h1>
-        <p class="view-subtitle">ย้ายรูปจาก Flash Drive / โทรศัพท์ ไปยังเครื่อง พร้อมให้ AI วิเคราะห์คำอธิบายและ Tag</p>
+        <p class="view-subtitle">สำรองรูปจาก Flash Drive / โทรศัพท์ ไปยังเครื่อง พร้อมให้ AI วิเคราะห์คำอธิบายและ Tag</p>
       </div>
 
       <!-- Missing files badge in header if any -->
@@ -176,32 +177,81 @@
             {{ allSelected ? 'ยกเลิกการเลือก' : 'เลือกทั้งหมด' }}
           </button>
 
+          <div class="btn-divider"></div>
+
+          <!-- สำรอง (คัดลอกไฟล์ - ไฟล์ต้นทางยังคงอยู่) -->
           <button 
             class="btn-tool btn-primary-light" 
-            @click="handleMoveSelected"
-            :disabled="selectedFiles.length === 0 || isProcessing"
+            @click="handleBackupSelected"
+            :disabled="selectedFiles.length === 0"
+            :title="activeQueueItem ? 'เพิ่มรูปภาพที่เลือกเข้าคิวสำรองต่อจากงานปัจจุบัน' : 'คัดลอกรูปภาพที่เลือกไปยังปลายทาง (เก็บไฟล์ต้นทางไว้)'"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="17 8 12 3 7 8"/>
               <line x1="12" y1="3" x2="12" y2="15"/>
             </svg>
-            ย้ายที่เลือก ({{ selectedFiles.length }})
+            {{ activeQueueItem ? `+ เข้าคิวสำรอง (${selectedFiles.length})` : `สำรองที่เลือก (${selectedFiles.length})` }}
           </button>
 
           <button 
             class="btn-tool btn-primary-solid" 
-            @click="handleMoveAll"
-            :disabled="sourceFiles.length === 0 || isProcessing"
+            @click="handleBackupAll"
+            :disabled="sourceFiles.length === 0"
+            :title="activeQueueItem ? 'เพิ่มรูปภาพทั้งหมดเข้าคิวสำรองต่อจากงานปัจจุบัน' : 'คัดลอกรูปภาพทั้งหมดไปยังปลายทาง (เก็บไฟล์ต้นทางไว้)'"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="17 8 12 3 7 8"/>
               <line x1="12" y1="3" x2="12" y2="15"/>
             </svg>
-            สำรองทั้งหมด
+            {{ activeQueueItem ? '+ เข้าคิวสำรองทั้งหมด' : 'สำรองทั้งหมด' }}
+          </button>
+
+          <div class="btn-divider"></div>
+
+          <!-- ย้าย (ย้ายไฟล์ - ลบไฟล์ต้นทางออก) -->
+          <button 
+            class="btn-tool btn-amber-light" 
+            @click="handleMoveSelected"
+            :disabled="selectedFiles.length === 0"
+            :title="activeQueueItem ? 'เพิ่มรูปภาพที่เลือกเข้าคิวย้ายต่อจากงานปัจจุบัน' : 'ย้ายรูปภาพที่เลือกไปยังปลายทาง (ไฟล์ต้นทางจะถูกลบออก)'"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12h14"/>
+              <path d="m12 5 7 7-7 7"/>
+            </svg>
+            {{ activeQueueItem ? `+ เข้าคิวย้าย (${selectedFiles.length})` : `ย้ายที่เลือก (${selectedFiles.length})` }}
+          </button>
+
+          <button 
+            class="btn-tool btn-amber-solid" 
+            @click="handleMoveAll"
+            :disabled="sourceFiles.length === 0"
+            :title="activeQueueItem ? 'เพิ่มรูปภาพทั้งหมดเข้าคิวย้ายต่อจากงานปัจจุบัน' : 'ย้ายรูปภาพทั้งหมดไปยังปลายทาง (ไฟล์ต้นทางจะถูกลบออก)'"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12h14"/>
+              <path d="m12 5 7 7-7 7"/>
+            </svg>
+            {{ activeQueueItem ? '+ เข้าคิวย้ายทั้งหมด' : 'ย้ายทั้งหมด' }}
           </button>
         </div>
+      </div>
+
+      <!-- Sequential FIFO Queue Banner -->
+      <div v-if="backupQueue.length > 0" class="queue-status-banner">
+        <div class="queue-banner-left">
+          <span class="queue-pulse-dot"></span>
+          <span class="queue-title">กำลังประมวลผลตามคิว ({{ backupQueue.length }} งาน):</span>
+          <span class="queue-current-item">
+            {{ activeQueueItem ? activeQueueItem.name : 'กำลังประมวลผล...' }}
+          </span>
+          <span v-if="backupQueue.length > 1" class="queue-waiting-badge">
+            + อีก {{ backupQueue.length - 1 }} คิวรอทำต่อ
+          </span>
+        </div>
+        <div class="queue-banner-tag">เรียงตามคิว ไม่ลัดคิว (FIFO)</div>
       </div>
 
       <!-- Photo Grid Cards -->
@@ -272,6 +322,8 @@
       </div>
     </section>
 
+    </div><!-- end .backup-scroll-area -->
+
     <!-- Bottom Status Bar (ผลการสำรองล่าสุด) -->
     <footer class="bottom-status-bar" v-if="lastSummary.has_run">
       <div class="status-left">
@@ -280,7 +332,7 @@
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
             <polyline points="20 6 9 17 4 12"/>
           </svg>
-          ย้ายสำเร็จ {{ lastSummary.moved_files }}
+          สำรองสำเร็จ {{ lastSummary.moved_files }}
         </span>
         <span class="status-pill pill-warning">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -290,13 +342,14 @@
         </span>
         <button
           class="status-pill pill-ai clickable"
-          @click="showAiResultsModal = true"
+          @click="handleOpenAiResults"
           title="คลิกเพื่อดูคำอธิบายและ Tag จาก AI ทั้งหมด"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
           </svg>
-          AI วิเคราะห์ {{ lastSummary.moved_files }}/{{ lastSummary.moved_files }} (คลิกดูคำอธิบาย & Tag)
+          <span v-if="isAnalyzing">กำลังวิเคราะห์ AI {{ aiProgress.current }}/{{ aiProgress.total || lastSummary.moved_files }} (คลิกดูสด)</span>
+          <span v-else>AI วิเคราะห์ {{ aiProgress.current || lastSummary.moved_files }}/{{ aiProgress.total || lastSummary.moved_files }} (คลิกดูคำอธิบาย & Tag)</span>
         </button>
       </div>
 
@@ -344,7 +397,7 @@
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
             <polyline points="20 6 9 17 4 12"/>
           </svg>
-          ย้ายสำเร็จ {{ lastSummary.moved_files }}
+          สำรองสำเร็จ {{ lastSummary.moved_files }}
         </span>
         <span class="status-pill pill-warning">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -467,7 +520,7 @@
             <span class="modal-icon">🤖</span>
             <div>
               <h3>ผลการวิเคราะห์ภาพด้วย AI (Gemini Flash)</h3>
-              <p class="modal-subtitle">บันทึกคำอธิบายและแท็กลง SQLite แล้ว (พบ {{ analyzedPhotosList.length }} ภาพ)</p>
+              <p class="modal-subtitle">บันทึกคำอธิบายและแท็กลง SQLite แล้ว (สำเร็จ {{ analyzedPhotosList.filter(p => !!p.description).length }}/{{ analyzedPhotosList.length }} ภาพ)</p>
             </div>
           </div>
           <button class="btn-close" @click="showAiResultsModal = false">✕</button>
@@ -483,7 +536,7 @@
               </div>
               <div class="ai-card-desc">
                 <span class="ai-label">คำอธิบายจาก AI:</span>
-                <p class="ai-desc-text">{{ item.description || '(ไม่มีคำอธิบาย - ข้ามตามเงื่อนไขข้อ 14)' }}</p>
+                <p class="ai-desc-text">{{ item.description || (isAnalyzing ? 'กำลังรอคิววิเคราะห์ AI...' : '(ไม่มีคำอธิบาย - ข้ามตามเงื่อนไขข้อ 14)') }}</p>
               </div>
               <div class="ai-card-tags" v-if="item.tags && item.tags.length > 0">
                 <span class="ai-label">Tags:</span>
@@ -600,6 +653,8 @@ const {
   aiError,
   integrityResult,
   lastSummary,
+  backupQueue,
+  activeQueueItem,
   sourceTotalBytes,
   displayMissingPreview,
   allSelected,
@@ -611,9 +666,13 @@ const {
   handleBrowserFolderUpload,
   selectDestFolder,
   listDestFiles,
+  backupSelectedPhotos,
+  backupAllPhotos,
   moveSelectedPhotos,
   moveAllPhotos,
-  initBackupState
+  initBackupState,
+  stopLiveTimer,
+  fetchDbPhotos
 } = useBackup()
 
 // Sync props if provided
@@ -628,6 +687,10 @@ watch(sourcePath, (newVal) => emit('update:source', newVal))
 watch(destPath, (newVal) => emit('update:dest', newVal))
 
 // Action bridges for template buttons
+function handleOpenAiResults() {
+  fetchDbPhotos()
+  showAiResultsModal.value = true
+}
 function handleSelectSource() {
   selectSourceFolder(folderInputRef.value)
 }
@@ -640,6 +703,14 @@ function handleOpenDestList() {
   listDestFiles()
 }
 
+function handleBackupSelected() {
+  backupSelectedPhotos()
+}
+
+function handleBackupAll() {
+  backupAllPhotos()
+}
+
 function handleMoveSelected() {
   moveSelectedPhotos()
 }
@@ -650,6 +721,11 @@ function handleMoveAll() {
 
 function handleCancelAnalysis() {
   if (confirm('คุณต้องการยกเลิกการวิเคราะห์ภาพด้วย AI หรือไม่?')) {
+    // Tell Go to stop the background goroutine
+    if (typeof (window as any)?.go?.main?.App?.CancelAnalysis === 'function') {
+      (window as any).go.main.App.CancelAnalysis()
+    }
+    stopLiveTimer()
     isAnalyzing.value = false
     aiProgress.value = { current: 0, total: 0, filename: '' }
   }
@@ -696,12 +772,19 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: 24px 28px 16px 28px;
+  padding: 0;
   box-sizing: border-box;
   background-color: #F4F5FA;
-  overflow-y: auto;
+  overflow: hidden;
   user-select: none;
   font-family: 'Prompt', 'Inter', sans-serif;
+}
+
+.backup-scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px 16px 28px;
+  box-sizing: border-box;
 }
 
 /* Header */
@@ -1038,9 +1121,111 @@ onMounted(() => {
   background: #4338CA;
 }
 
+.btn-divider {
+  width: 1px;
+  height: 22px;
+  background-color: #E5E7EB;
+  margin: 0 2px;
+}
+
+.btn-amber-light {
+  background: #FFFBEB;
+  border: 1px solid #FCD34D;
+  color: #D97706;
+}
+
+.btn-amber-light:hover:not(:disabled) {
+  background: #FEF3C7;
+  color: #B45309;
+}
+
+.btn-amber-solid {
+  background: #D97706;
+  border: 1px solid #D97706;
+  color: #FFFFFF;
+  box-shadow: 0 2px 6px rgba(217, 119, 6, 0.25);
+}
+
+.btn-amber-solid:hover:not(:disabled) {
+  background: #B45309;
+}
+
 .btn-tool:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Sequential FIFO Queue Banner */
+.queue-status-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #F0FDF4;
+  border: 1px solid #BBF7D0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: #166534;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.queue-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.queue-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #22C55E;
+  box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+  animation: pulse-green 1.5s infinite;
+}
+
+@keyframes pulse-green {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+}
+
+.queue-title {
+  font-weight: 600;
+}
+
+.queue-current-item {
+  color: #15803D;
+  font-weight: 600;
+}
+
+.queue-waiting-badge {
+  background: #DCFCE7;
+  color: #166534;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.queue-banner-tag {
+  font-size: 11px;
+  color: #15803D;
+  background: #FFFFFF;
+  border: 1px solid #86EFAC;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-weight: 600;
 }
 
 /* Photo Grid */
@@ -1228,6 +1413,7 @@ onMounted(() => {
   justify-content: space-between;
   box-shadow: 0 1px 3px rgba(0,0,0,0.02);
   flex-shrink: 0;
+  margin: 0 28px 16px 28px;
 }
 
 .status-left {

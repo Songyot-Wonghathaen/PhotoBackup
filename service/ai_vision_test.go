@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"PhotoVault/model/model"
 	"PhotoVault/repository"
@@ -158,3 +159,131 @@ func TestLiveAiVision(t *testing.T) {
 		t.Errorf("expected non-empty description")
 	}
 }
+
+func TestGridCollage1000Images(t *testing.T) {
+	datasetDir := `C:\Users\keenz\Downloads\set_1000_image`
+	entries, err := os.ReadDir(datasetDir)
+	if err != nil || len(entries) == 0 {
+		t.Skipf("Skipping 1000-image collage test: %v", err)
+	}
+
+	var paths []string
+	for _, e := range entries {
+		if !e.IsDir() && isImageFile(e.Name()) {
+			paths = append(paths, filepath.Join(datasetDir, e.Name()))
+		}
+	}
+
+	batchSize := 20
+	numBatches := (len(paths) + batchSize - 1) / batchSize
+	totalCollageBytes := 0
+
+	for i := 0; i < len(paths); i += batchSize {
+		end := i + batchSize
+		if end > len(paths) {
+			end = len(paths)
+		}
+		collage, err := buildGridCollageJPEG(paths[i:end], 160)
+		if err != nil {
+			t.Fatalf("failed to build collage for batch %d: %v", i/batchSize, err)
+		}
+		totalCollageBytes += len(collage)
+	}
+
+	t.Logf("Successfully built %d Grid Collages for %d images (avg %.1f KB per 20-image collage)",
+		numBatches, len(paths), float64(totalCollageBytes)/float64(numBatches)/1024.0)
+
+	if os.Getenv("RUN_LIVE_BATCH_TEST") == "1" {
+		ai := NewAiVisionService()
+		if batchAi, ok := ai.(BatchAiVisionService); ok && ai.IsAvailable() {
+			sample20 := paths[:20]
+			res, err := batchAi.AnalyzePhotoBatch(context.Background(), sample20)
+			if err != nil {
+				t.Logf("Live Batch 20 returned error: %v", err)
+				return
+			}
+			for i := 0; i < 5 && i < len(res); i++ {
+				if res[i] != nil {
+					t.Logf("Photo [%d] %s -> Desc: %s | Tags: %v", i, filepath.Base(sample20[i]), res[i].Description, res[i].Tags)
+				}
+			}
+		}
+	}
+}
+
+func TestListModels(t *testing.T) {
+	datasetDir := `C:\Users\keenz\Downloads\set_1000_image`
+	entries, err := os.ReadDir(datasetDir)
+	if err != nil || len(entries) < 25 {
+		datasetDir = `D:\backup`
+		entries, err = os.ReadDir(datasetDir)
+	}
+	if err != nil || len(entries) < 25 {
+		t.Skipf("Dataset not found: %v", err)
+	}
+
+	var sample25 []string
+	for _, e := range entries {
+		if !e.IsDir() && isImageFile(e.Name()) {
+			sample25 = append(sample25, filepath.Join(datasetDir, e.Name()))
+			if len(sample25) == 25 {
+				break
+			}
+		}
+	}
+
+	startCollage := time.Now()
+	collageBytes, err := buildGridCollageJPEG(sample25, 220)
+	if err != nil {
+		t.Fatalf("buildGridCollageJPEG error: %v", err)
+	}
+	t.Logf("Built 25-photo collage (220x220 tile, 1100x1100 px) in %v, size: %.1f KB", time.Since(startCollage), float64(len(collageBytes))/1024.0)
+
+	ai := NewAiVisionService().(*geminiVisionService)
+	ai.models = []string{"gemini-3.5-flash-lite", "gemini-3.1-flash-lite"}
+	ai.cooldowns = make(map[string]time.Time)
+
+	startAPI := time.Now()
+	res, err := ai.AnalyzePhotoBatch(context.Background(), sample25)
+	if err != nil {
+		t.Fatalf("AnalyzePhotoBatch failed: %v", err)
+	}
+	t.Logf("Gemini analyzed 25 photos in %v!", time.Since(startAPI))
+
+	validCount := 0
+	for i, r := range res {
+		if r != nil && r.Description != "" {
+			validCount++
+			t.Logf("[%02d] %-28s -> Tags: %v | คำอธิบาย: %s", i, filepath.Base(sample25[i]), r.Tags, r.Description)
+		} else {
+			t.Logf("[%02d] %-28s -> MISSING!", i, filepath.Base(sample25[i]))
+		}
+	}
+	t.Logf("Total valid analyzed in single batch: %d/25", validCount)
+}
+
+func TestSmartProjectAllocation(t *testing.T) {
+	if got := ComputeSmartWorkers(1); got != 4 {
+		t.Fatalf("expected 4 workers for 1 key, got %d", got)
+	}
+	if got := ComputeSmartWorkers(5); got != 12 {
+		t.Fatalf("expected 12 workers for 5 keys, got %d", got)
+	}
+	if got := ComputeSmartWorkers(10); got != 16 {
+		t.Fatalf("expected 16 workers for 10 keys, got %d", got)
+	}
+
+	keys := extractApiKeysFromInput("AQ.Ab8RN6KeyOne12345, AQ.Ab8RN6KeyTwo67890")
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 extracted keys, got %d: %v", len(keys), keys)
+	}
+
+	// Verify resilient JSON recovery against extra ']' or prose brackets '[0]'
+	malformed := `Here is tile [0]: [{"i":0,"d":"ภูเขาหิมะ","t":["ภูเขา","หิมะ"]},{"i":1,"d":"ทะเลทราย","t":["ทราย"]}}]]`
+	items, err := parseBatchJsonItems(malformed)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("expected 2 recovered items from malformed JSON, got %d (err=%v)", len(items), err)
+	}
+}
+
+

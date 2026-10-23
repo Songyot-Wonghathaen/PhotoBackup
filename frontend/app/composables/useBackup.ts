@@ -26,6 +26,41 @@ const aiProgress = ref({ current: 0, total: 0, filename: '' })
 const aiError = ref<string | null>(null)
 const analyzedPhotosList = ref<Array<{ filename: string; description: string; tags: string[]; path?: string }>>([])
 
+export interface BackupQueueItem {
+  id: string
+  name: string
+  type: 'backup' | 'move'
+  targets: string[]
+  isAll: boolean
+  totalCount: number
+  status: 'waiting' | 'running' | 'completed' | 'failed'
+  createdAt: number
+}
+
+// FIFO Queue State: Ensures subsequent backups/moves wait until the current one finishes
+const backupQueue = ref<BackupQueueItem[]>([])
+const activeQueueItem = ref<BackupQueueItem | null>(null)
+let queueWorkerRunning = false
+let resolveCurrentBatchAi: (() => void) | null = null
+
+// Fallback timer: closes the AI popup if no progress event arrives within 3 minutes
+let aiTimeoutHandle: ReturnType<typeof setTimeout> | null = null
+
+function startAiTimeout() {
+  if (aiTimeoutHandle) clearTimeout(aiTimeoutHandle)
+  aiTimeoutHandle = setTimeout(() => {
+    isAnalyzing.value = false
+    aiTimeoutHandle = null
+  }, 3 * 60 * 1000)
+}
+
+function clearAiTimeout() {
+  if (aiTimeoutHandle) {
+    clearTimeout(aiTimeoutHandle)
+    aiTimeoutHandle = null
+  }
+}
+
 const integrityResult = ref<IntegrityResult | null>(null)
 const lastSummary = ref<MoveSummary>({
   total_files: 0,
@@ -36,6 +71,43 @@ const lastSummary = ref<MoveSummary>({
   duration_formatted: '-',
   has_run: false
 })
+
+let opStartTime = 0
+let timerInterval: any = null
+
+function formatDurationPretty(ms: number): string {
+  const totalSeconds = ms / 1000
+  if (totalSeconds < 60) {
+    return `${totalSeconds.toFixed(1)} วินาที`
+  }
+  const mins = Math.floor(totalSeconds / 60)
+  const secs = (totalSeconds % 60).toFixed(1)
+  return `${mins} นาที ${secs} วินาที`
+}
+
+function startLiveTimer() {
+  if (timerInterval) clearInterval(timerInterval)
+  timerInterval = setInterval(() => {
+    if (!opStartTime || !isAnalyzing.value) {
+      clearInterval(timerInterval)
+      timerInterval = null
+      return
+    }
+    const elapsed = Date.now() - opStartTime
+    lastSummary.value.duration_formatted = `${formatDurationPretty(elapsed)} (กำลังวิเคราะห์...)`
+  }, 500)
+}
+
+function stopLiveTimer() {
+  if (timerInterval) {
+    clearInterval(timerInterval)
+    timerInterval = null
+  }
+  if (opStartTime > 0) {
+    const elapsed = Date.now() - opStartTime
+    lastSummary.value.duration_formatted = formatDurationPretty(elapsed)
+  }
+}
 
 export function useBackup() {
   // Computed values
@@ -236,132 +308,193 @@ export function useBackup() {
     }
   }
 
-  // Feature 6, 7, 8, 9, 11: Move Selected Photos
-  async function moveSelectedPhotos() {
-    if (!sourcePath.value) {
-      alert('กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการย้ายไฟล์!')
-      return
-    }
-    if (!destPath.value) {
-      alert('กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการย้ายไฟล์!')
-      return
-    }
-    if (selectedFiles.value.length === 0) {
-      alert('กรุณาเลือกรูปภาพอย่างน้อย 1 ไฟล์ที่ต้องการย้าย!')
-      return
-    }
+  // Sequential Queue Runner: processes items in strict FIFO order
+  async function runQueueWorker() {
+    if (queueWorkerRunning) return
+    queueWorkerRunning = true
 
-    isProcessing.value = true
     try {
-      if (typeof (window as any)?.go?.main?.App?.MovePhotos === 'function') {
-        const summary = await (window as any).go.main.App.MovePhotos(selectedFiles.value, false)
-        lastSummary.value = {
-          total_files: summary.total_files || selectedFiles.value.length,
-          moved_files: summary.moved_files || 0,
-          skipped_files: summary.skipped_files || 0,
-          failed_files: summary.failed_files || 0,
-          duration_ms: summary.duration_ms || 0,
-          duration_formatted: summary.duration_formatted || `${summary.duration_ms} ms`,
-          has_run: true
+      while (backupQueue.value.length > 0) {
+        const item = backupQueue.value[0]
+        if (!item) break
+
+        item.status = 'running'
+        activeQueueItem.value = item
+        isProcessing.value = true
+        opStartTime = Date.now()
+
+        const actionName = item.type === 'move' ? 'ย้าย' : 'สำรอง'
+        const isMove = item.type === 'move'
+
+        try {
+          const app = (window as any)?.go?.main?.App
+          let summary: any = null
+
+          if (isMove && typeof app?.MovePhotos === 'function') {
+            summary = await app.MovePhotos(item.targets, item.isAll)
+          } else if (!isMove && typeof app?.BackupPhotos === 'function') {
+            summary = await app.BackupPhotos(item.targets, item.isAll)
+          } else if (typeof app?.MovePhotos === 'function') {
+            summary = await app.MovePhotos(item.targets, item.isAll)
+          }
+
+          if (summary) {
+            lastSummary.value = {
+              total_files: summary.total_files || item.totalCount,
+              moved_files: summary.moved_files || 0,
+              skipped_files: summary.skipped_files || 0,
+              failed_files: summary.failed_files || 0,
+              duration_ms: summary.duration_ms || 0,
+              duration_formatted: summary.duration_formatted || `${summary.duration_ms} ms`,
+              has_run: true
+            }
+
+            // If files were moved/backed up, wait for AI analysis to finish before moving to next queue item!
+            if ((summary.moved_files || 0) > 0) {
+              isAnalyzing.value = true
+              aiProgress.value = { current: 0, total: summary.moved_files || 0, filename: '' }
+              startLiveTimer()
+
+              // Wait until AI analysis of this batch completes so next task never skips the line!
+              await new Promise<void>((resolve) => {
+                let resolved = false
+                const done = () => {
+                  if (!resolved) {
+                    resolved = true
+                    resolveCurrentBatchAi = null
+                    resolve()
+                  }
+                }
+                resolveCurrentBatchAi = done
+
+                // Fallback timeout in case AI auto-analyze is disabled in settings
+                setTimeout(() => {
+                  if (!isAnalyzing.value || aiProgress.value.total === 0) {
+                    done()
+                  }
+                }, 2000)
+              })
+            } else {
+              stopLiveTimer()
+            }
+
+            aiError.value = null
+            await refreshSourceFiles()
+
+            if (typeof app?.CheckIntegrity === 'function') {
+              integrityResult.value = await app.CheckIntegrity(destPath.value)
+              destCount.value = integrityResult.value?.total_disk || 0
+            }
+            await fetchDbPhotos()
+
+            const suffix = isMove ? ' (ลบออกจากต้นทางแล้ว)' : ' (เก็บไฟล์ต้นทางไว้)'
+            const scopeText = item.isAll ? 'ทั้งหมด' : 'ที่เลือก'
+            successMessage.value = `${actionName}รูปภาพ${scopeText}สำเร็จ ${summary.moved_files} ไฟล์${suffix} (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`
+            showSuccessModal.value = true
+          } else {
+            // Browser preview fallback
+            const count = item.totalCount
+            destCount.value += count
+            lastSummary.value = {
+              total_files: count,
+              moved_files: count,
+              skipped_files: 0,
+              failed_files: 0,
+              duration_ms: 18.5,
+              duration_formatted: '18.50 ms',
+              has_run: true
+            }
+            if (isMove) {
+              sourceFiles.value = sourceFiles.value.filter(f => !item.targets.includes(f.filename))
+            }
+            successMessage.value = `จำลองการ${actionName}ไฟล์สำเร็จ ${count} รูป (เวลา ${lastSummary.value.duration_formatted})`
+            showSuccessModal.value = true
+          }
+          item.status = 'completed'
+        } catch (err: any) {
+          item.status = 'failed'
+          const errorMsg = err?.message || String(err)
+          aiError.value = errorMsg
+          alert(`เกิดข้อผิดพลาดในการ${actionName}: ` + errorMsg)
+        } finally {
+          // Remove completed/failed item from queue
+          backupQueue.value.shift()
         }
-        aiError.value = null // Clear any previous errors
-        await refreshSourceFiles()
-        if (typeof (window as any)?.go?.main?.App?.CheckIntegrity === 'function') {
-          integrityResult.value = await (window as any).go.main.App.CheckIntegrity(destPath.value)
-          destCount.value = integrityResult.value?.total_disk || 0
-        }
-        await fetchDbPhotos()
-        successMessage.value = `สำรองรูปภาพที่เลือกสำเร็จ ${summary.moved_files} ไฟล์ (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`
-        showSuccessModal.value = true
-      } else {
-        // Browser preview fallback
-        const count = selectedFiles.value.length
-        destCount.value += count
-        lastSummary.value = {
-          total_files: count,
-          moved_files: count,
-          skipped_files: 0,
-          failed_files: 0,
-          duration_ms: 18.5,
-          duration_formatted: '18.50 ms',
-          has_run: true
-        }
-        sourceFiles.value = sourceFiles.value.filter(f => !selectedFiles.value.includes(f.filename))
-        selectedFiles.value = []
-        successMessage.value = `จำลองการย้ายไฟล์สำเร็จ ${count} รูป (เวลา ${lastSummary.value.duration_formatted})`
-        showSuccessModal.value = true
       }
-    } catch (err: any) {
-      const errorMsg = err?.message || String(err)
-      aiError.value = errorMsg
-      alert('เกิดข้อผิดพลาดในการย้าย: ' + errorMsg)
     } finally {
+      activeQueueItem.value = null
       isProcessing.value = false
+      queueWorkerRunning = false
     }
   }
 
-  // Feature 6, 7, 8, 9, 11: Move All Photos
-  async function moveAllPhotos() {
+  // Helper for both Backup (Copy) and Move (Cut) - Queues work in FIFO order
+  async function executeTransfer(isMove: boolean, isAll: boolean) {
+    const actionName = isMove ? 'ย้าย' : 'สำรอง'
     if (!sourcePath.value) {
-      alert('กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการสำรองข้อมูล!')
+      alert(`กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการ${actionName}ไฟล์!`)
       return
     }
     if (!destPath.value) {
-      alert('กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการสำรองข้อมูล!')
+      alert(`กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการ${actionName}ไฟล์!`)
       return
     }
-    if (sourceFiles.value.length === 0) {
-      alert('ไม่พบรูปภาพในโฟลเดอร์ต้นทางที่จะสำรอง!')
+    if (!isAll && selectedFiles.value.length === 0) {
+      alert(`กรุณาเลือกรูปภาพอย่างน้อย 1 ไฟล์ที่ต้องการ${actionName}!`)
+      return
+    }
+    if (isAll && sourceFiles.value.length === 0) {
+      alert(`ไม่พบรูปภาพในโฟลเดอร์ต้นทางที่จะ${actionName}!`)
       return
     }
 
-    isProcessing.value = true
-    try {
-      if (typeof (window as any)?.go?.main?.App?.MovePhotos === 'function') {
-        const summary = await (window as any).go.main.App.MovePhotos([], true)
-        lastSummary.value = {
-          total_files: summary.total_files || sourceFiles.value.length,
-          moved_files: summary.moved_files || 0,
-          skipped_files: summary.skipped_files || 0,
-          failed_files: summary.failed_files || 0,
-          duration_ms: summary.duration_ms || 0,
-          duration_formatted: summary.duration_formatted || `${summary.duration_ms} ms`,
-          has_run: true
-        }
-        aiError.value = null // Clear any previous errors
-        await refreshSourceFiles()
-        if (typeof (window as any)?.go?.main?.App?.CheckIntegrity === 'function') {
-          integrityResult.value = await (window as any).go.main.App.CheckIntegrity(destPath.value)
-          destCount.value = integrityResult.value?.total_disk || 0
-        }
-        await fetchDbPhotos()
-        successMessage.value = `สำรองรูปภาพทั้งหมดสำเร็จ ${summary.moved_files} ไฟล์ (ข้ามไฟล์ซ้ำ ${summary.skipped_files} ไฟล์) ใช้เวลา ${summary.duration_formatted}`
-        showSuccessModal.value = true
-      } else {
-        // Browser preview fallback
-        const count = sourceFiles.value.filter(f => !f.is_duplicate).length
-        const skipped = sourceFiles.value.filter(f => f.is_duplicate).length
-        destCount.value += count
-        lastSummary.value = {
-          total_files: sourceFiles.value.length,
-          moved_files: count,
-          skipped_files: skipped,
-          failed_files: 0,
-          duration_ms: 32.4,
-          duration_formatted: '32.40 ms',
-          has_run: true
-        }
-        sourceFiles.value = sourceFiles.value.filter(f => f.is_duplicate)
-        selectedFiles.value = []
-        alert(`จำลองการสำรองทั้งหมดสำเร็จ ${count} รูป (ข้ามไฟล์ซ้ำ ${skipped} รูป) เวลา ${lastSummary.value.duration_formatted}`)
+    if (isMove) {
+      const countText = isAll ? `ทั้งหมด ${sourceFiles.value.length}` : `${selectedFiles.value.length}`
+      if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการ "ย้าย" รูปภาพจำนวน ${countText} ไฟล์ไปยังปลายทาง?\n(ไฟล์ต้นทางในโฟลเดอร์ต้นทางจะถูกลบออกหลังจากย้ายสำเร็จ)`)) {
+        return
       }
-    } catch (err: any) {
-      const errorMsg = err?.message || String(err)
-      aiError.value = errorMsg
-      alert('เกิดข้อผิดพลาดในการย้าย: ' + errorMsg)
-    } finally {
-      isProcessing.value = false
     }
+
+    // Capture selected files and clear selection immediately so user can select more photos!
+    const targetsToRun = isAll ? [] : [...selectedFiles.value]
+    const count = isAll ? sourceFiles.value.length : targetsToRun.length
+    selectedFiles.value = []
+
+    const item: BackupQueueItem = {
+      id: 'task_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      name: isAll ? `${actionName}ทั้งหมด (${count} ไฟล์)` : `${actionName}ที่เลือก (${count} ไฟล์)`,
+      type: isMove ? 'move' : 'backup',
+      targets: targetsToRun,
+      isAll,
+      totalCount: count,
+      status: 'waiting',
+      createdAt: Date.now()
+    }
+
+    backupQueue.value.push(item)
+
+    // Trigger queue runner if not already running
+    if (!queueWorkerRunning) {
+      runQueueWorker()
+    }
+  }
+
+  // Backup (Copy) actions
+  function backupSelectedPhotos() {
+    return executeTransfer(false, false)
+  }
+
+  function backupAllPhotos() {
+    return executeTransfer(false, true)
+  }
+
+  // Move (Cut/Transfer) actions
+  function moveSelectedPhotos() {
+    return executeTransfer(true, false)
+  }
+
+  function moveAllPhotos() {
+    return executeTransfer(true, true)
   }
 
   // Fetch photos from DB including AI descriptions and tags
@@ -379,6 +512,10 @@ export function useBackup() {
               tags: tags,
               path: destPath.value ? `${destPath.value}/${p.file_name}` : p.file_name
             }
+          }).sort((a, b) => {
+            if (a.description && !b.description) return -1
+            if (!a.description && b.description) return 1
+            return 0
           })
           return dbPhotos
         }
@@ -427,15 +564,63 @@ export function useBackup() {
       }
     }
 
-    // Listen to AI analysis progress events
+    // Listen to AI analysis progress events from the Go background goroutine
     if (typeof (window as any)?.runtime?.EventsOn === 'function') {
-      (window as any).runtime.EventsOn('ai_analysis_progress', (data: any) => {
+      if (typeof (window as any)?.runtime?.EventsOff === 'function') {
+        ;(window as any).runtime.EventsOff('ai_analysis_progress')
+        ;(window as any).runtime.EventsOff('ai_analysis_error')
+      }
+      let lastFetchTime = 0
+      ;(window as any).runtime.EventsOn('ai_analysis_progress', (data: any) => {
+        clearAiTimeout()
+        const cur = data?.current || 0
+        const tot = data?.total || 0
+        const isDone = Boolean(data?.done) || (tot > 0 && cur >= tot)
+
         aiProgress.value = {
-          current: data.current || 0,
-          total: data.total || 0,
-          filename: data.filename || ''
+          current: isDone ? tot : cur,
+          total: tot,
+          filename: data?.filename || ''
         }
-        isAnalyzing.value = data.current < data.total
+
+        // Live update: refresh DB records periodically or if user has results modal open
+        const now = Date.now()
+        if (isDone || showAiResultsModal.value || (now - lastFetchTime > 1200)) {
+          lastFetchTime = now
+          fetchDbPhotos()
+        }
+
+        if (isDone) {
+          stopLiveTimer()
+          if (resolveCurrentBatchAi) {
+            resolveCurrentBatchAi()
+            resolveCurrentBatchAi = null
+          }
+          setTimeout(() => {
+            if (!activeQueueItem.value) {
+              isAnalyzing.value = false
+            }
+          }, 800)
+        } else {
+          isAnalyzing.value = true
+          // Reset watchdog for each event so we only fire if Go goes silent
+          startAiTimeout()
+        }
+      })
+
+      // Listen for per-file AI errors emitted by the Go background goroutine
+      ;(window as any).runtime.EventsOn('ai_analysis_error', (data: any) => {
+        stopLiveTimer()
+        const filename = data?.filename || 'ไฟล์ไม่ทราบชื่อ'
+        const errMsg = data?.error || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ'
+        aiError.value = `วิเคราะห์ภาพ "${filename}" ไม่สำเร็จ: ${errMsg}`
+        // Close the popup immediately on first error
+        clearAiTimeout()
+        isAnalyzing.value = false
+        if (resolveCurrentBatchAi) {
+          resolveCurrentBatchAi()
+          resolveCurrentBatchAi = null
+        }
       })
     }
   }
@@ -462,6 +647,8 @@ export function useBackup() {
     analyzedPhotosList,
     integrityResult,
     lastSummary,
+    backupQueue,
+    activeQueueItem,
 
     // Computed
     sourceTotalBytes,
@@ -481,10 +668,13 @@ export function useBackup() {
     listDestFiles,
     refreshSourceFiles,
     loadThumbnails,
+    backupSelectedPhotos,
+    backupAllPhotos,
     moveSelectedPhotos,
     moveAllPhotos,
     fetchDbPhotos,
     analyzeSinglePhoto,
-    initBackupState
+    initBackupState,
+    stopLiveTimer
   }
 }

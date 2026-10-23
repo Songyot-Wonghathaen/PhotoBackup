@@ -6,6 +6,14 @@ export function AnalyzePhoto(arg1) {
   return window['go']['service']['BackupService']['AnalyzePhoto'](arg1);
 }
 
+export function Backup(arg1, arg2) {
+  return window['go']['service']['BackupService']['Backup'](arg1, arg2);
+}
+
+export function CancelAnalysis() {
+  return window['go']['service']['BackupService']['CancelAnalysis']();
+}
+
 export function CheckIntegrity(arg1) {
   return window['go']['service']['BackupService']['CheckIntegrity'](arg1);
 }
@@ -18,6 +26,18 @@ export function Delete(arg1, arg2) {
   return window['go']['service']['BackupService']['Delete'](arg1, arg2);
 }
 
+export function DeleteFromDest(arg1, arg2, arg3) {
+  return window['go']['service']['BackupService']['DeleteFromDest'](arg1, arg2, arg3);
+}
+
+export function DeleteProjectApiKey(arg1) {
+  return window['go']['service']['BackupService']['DeleteProjectApiKey'](arg1);
+}
+
+export function GetAppSettings() {
+  return window['go']['service']['BackupService']['GetAppSettings']();
+}
+
 export function GetDest() {
   return window['go']['service']['BackupService']['GetDest']();
 }
@@ -28,6 +48,10 @@ export function GetSource() {
 
 export function GetTagsWithCount(arg1) {
   return window['go']['service']['BackupService']['GetTagsWithCount'](arg1);
+}
+
+export function ListAllDB(arg1) {
+  return window['go']['service']['BackupService']['ListAllDB'](arg1);
 }
 
 export function ListDB(arg1) {
@@ -52,6 +76,14 @@ export function ListSourceFiles() {
 
 export function Move(arg1, arg2) {
   return window['go']['service']['BackupService']['Move'](arg1, arg2);
+}
+
+export function ResetAiQuotaCooldowns() {
+  return window['go']['service']['BackupService']['ResetAiQuotaCooldowns']();
+}
+
+export function SaveProjectApiKey(arg1, arg2, arg3, arg4) {
+  return window['go']['service']['BackupService']['SaveProjectApiKey'](arg1, arg2, arg3, arg4);
 }
 
 export function SearchPhotosByDescription(arg1, arg2, arg3, arg4) {
@@ -88,4 +120,12 @@ export function SetSource(arg1) {
 
 export function SetTagRepo(arg1) {
   return window['go']['service']['BackupService']['SetTagRepo'](arg1);
+}
+
+export function ToggleProjectApiKey(arg1, arg2) {
+  return window['go']['service']['BackupService']['ToggleProjectApiKey'](arg1, arg2);
+}
+
+export function UpdateSystemSettings(arg1, arg2, arg3, arg4) {
+  return window['go']['service']['BackupService']['UpdateSystemSettings'](arg1, arg2, arg3, arg4);
 }

@@ -32,6 +32,7 @@ export interface SearchResult {
   page: number
   page_size: number
   total_pages: number
+  expanded_terms?: string[]
 }
 
 export interface PhotoDetail {
@@ -110,7 +111,7 @@ export function toTagCloudItems(items: TagItem[]): TagCloudItem[] {
       id: item.id,
       name: item.name,
       size: Math.round(TAG_SIZE_MIN + ratio * (TAG_SIZE_MAX - TAG_SIZE_MIN)),
-      color: TAG_COLORS[index % TAG_COLORS.length]
+      color: TAG_COLORS[index % TAG_COLORS.length] || '#4F46E5'
     }
   })
 }
@@ -118,7 +119,7 @@ export function toTagCloudItems(items: TagItem[]): TagCloudItem[] {
 // formatBackedUpAt renders the Go "2006-01-02 15:04:05" timestamp in Thai style
 export function formatBackedUpAt(value: string): string {
   if (!value) return '-'
-  const [datePart, timePart = ''] = value.split(' ')
+  const [datePart = '', timePart = ''] = value.split(' ')
   const [y, m, d] = datePart.split('-').map((n) => Number(n))
   if (!y || !m || !d) return value
   const months = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']

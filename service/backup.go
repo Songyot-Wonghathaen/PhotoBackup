@@ -100,16 +100,19 @@ func (s *BackupService) SetAiVision(aiVision AiVisionService) {
 	s.aiVision = aiVision
 }
 
-// AnalyzePhoto allows analyzing an individual photo directly
+// AnalyzePhoto allows analyzing an individual photo directly and saving to DB if the photo exists
 func (s *BackupService) AnalyzePhoto(filePath string) (*VisionResult, error) {
 	s.mu.RLock()
 	ai := s.aiVision
+	photoRepo := s.photoRepo
+	tagRepo := s.tagRepo
 	s.mu.RUnlock()
 
 	if ai == nil {
 		ai = NewAiVisionService()
 	}
-	res, err := ai.AnalyzePhoto(s.getCtx(), filePath)
+	ctx := s.getCtx()
+	res, err := ai.AnalyzePhoto(ctx, filePath)
 	if err == nil && res != nil {
 		tagsStr := "-"
 		if len(res.Tags) > 0 {
@@ -120,6 +123,21 @@ func (s *BackupService) AnalyzePhoto(filePath string) (*VisionResult, error) {
 			descStr = "(ไม่มีคำอธิบาย)"
 		}
 		log.Printf("[AI-Vision] %s -> Tags: [%s] | คำอธิบาย: %s", filepath.Base(filePath), tagsStr, descStr)
+
+		// Feature 13: บันทึกคำอธิบายและ Tag ลง DB ทันทีเมื่อวิเคราะห์ภาพสำเร็จ
+		if photoRepo != nil {
+			dest := filepath.Dir(filePath)
+			filename := filepath.Base(filePath)
+			photo, findErr := photoRepo.FindPhotoByFile(ctx, dest, filename)
+			if findErr == nil && photo != nil && photo.ID > 0 {
+				if res.Description != "" {
+					_ = photoRepo.UpdatePhotoDescription(ctx, photo.ID, res.Description)
+				}
+				if tagRepo != nil && len(res.Tags) > 0 {
+					_ = tagRepo.AddPhotoTagsInBatch(ctx, map[int32][]string{photo.ID: res.Tags}, "ai")
+				}
+			}
+		}
 	}
 	return res, err
 }
@@ -569,12 +587,20 @@ func (s *BackupService) analyzeMovedPhotos(ctx context.Context, dst string, phot
 
 	startAnalyze := time.Now()
 
-	// Build a filename→ID map with one query instead of querying per file.
-	dbPhotos, qErr := s.photoRepo.GetActivePhotosByDest(ctx, dst)
+	// Build a filename→ID map using existing IDs from movedPhotos first,
+	// then fill from GetAllPhotosByDest so both active and checked photos are found
 	idMap := make(map[string]int32, totalPhotos)
+	for _, p := range photos {
+		if p != nil && p.ID > 0 {
+			idMap[strings.ToLower(p.FileName)] = p.ID
+		}
+	}
+	dbPhotos, qErr := s.photoRepo.GetAllPhotosByDest(ctx, dst)
 	if qErr == nil {
 		for _, dbP := range dbPhotos {
-			idMap[strings.ToLower(dbP.FileName)] = dbP.ID
+			if dbP != nil && dbP.ID > 0 {
+				idMap[strings.ToLower(dbP.FileName)] = dbP.ID
+			}
 		}
 	}
 
@@ -747,6 +773,13 @@ func (s *BackupService) analyzeMovedPhotos(ctx context.Context, dst string, phot
 
 						realID := idMap[strings.ToLower(p.FileName)]
 						if realID <= 0 {
+							// Fallback lookup directly
+							if found, fErr := s.photoRepo.FindPhotoByFile(ctx, dst, p.FileName); fErr == nil && found != nil && found.ID > 0 {
+								realID = found.ID
+								idMap[strings.ToLower(p.FileName)] = realID
+							}
+						}
+						if realID <= 0 {
 							if vr.Description != "" {
 								_ = s.photoRepo.UpdatePhotoDescriptionByFile(ctx, dst, p.FileName, vr.Description)
 							}
@@ -775,13 +808,11 @@ func (s *BackupService) analyzeMovedPhotos(ctx context.Context, dst string, phot
 				// Always increment completedCount so UI progress never gets stuck below totalPhotos
 				done := int(atomic.AddInt32(&completedCount, int32(len(batch.items))))
 				lastFile := batch.items[len(batch.items)-1].FileName
-				if s.ctx != nil {
-					runtime.EventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
-						"current":  done,
-						"total":    totalPhotos,
-						"filename": lastFile,
-					})
-				}
+				safeEventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
+					"current":  done,
+					"total":    totalPhotos,
+					"filename": lastFile,
+				})
 			}
 		}(w)
 	}
@@ -789,27 +820,23 @@ func (s *BackupService) analyzeMovedPhotos(ctx context.Context, dst string, phot
 	wg.Wait()
 
 	if atomic.LoadInt32(&successBatches) == 0 && firstErr != nil {
-		if s.ctx != nil {
-			runtime.EventsEmit(s.ctx, "ai_analysis_error", map[string]interface{}{
-				"filename": firstErrFile,
-				"error":    firstErr.Error(),
-			})
-		}
+		safeEventsEmit(s.ctx, "ai_analysis_error", map[string]interface{}{
+			"filename": firstErrFile,
+			"error":    firstErr.Error(),
+		})
 		return
 	}
 
-	if s.ctx != nil {
-		lastFile := ""
-		if len(validPhotos) > 0 {
-			lastFile = validPhotos[len(validPhotos)-1].FileName
-		}
-		runtime.EventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
-			"current":  totalPhotos,
-			"total":    totalPhotos,
-			"filename": lastFile,
-			"done":     true,
-		})
+	lastFile := ""
+	if len(validPhotos) > 0 {
+		lastFile = validPhotos[len(validPhotos)-1].FileName
 	}
+	safeEventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
+		"current":  totalPhotos,
+		"total":    totalPhotos,
+		"filename": lastFile,
+		"done":     true,
+	})
 
 	log.Printf("[AI-Vision] วิเคราะห์เสร็จสิ้น %d รูป ใช้เวลาทั้งหมด %v", totalPhotos, time.Since(startAnalyze))
 }
@@ -1143,5 +1170,18 @@ func (s *BackupService) ResetAiQuotaCooldowns() (*dto.AppSettingsDTO, error) {
 		return nil, errors.New("AI Vision service is not configurable")
 	}
 	return cfg.ResetQuotaCooldowns()
+}
+
+func safeEventsEmit(ctx context.Context, eventName string, data ...interface{}) {
+	if ctx == nil {
+		return
+	}
+	if ctx.Value("frontend") == nil && ctx.Value("events") == nil && ctx.Value("app") == nil {
+		return
+	}
+	defer func() {
+		_ = recover()
+	}()
+	runtime.EventsEmit(ctx, eventName, data...)
 }
 

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -139,7 +140,34 @@ func (r *galleryRepository) Search(ctx context.Context, dest string, params dto.
 		}, nil
 	}
 
-	// Feature 15: whitespace-separated words are combined with AND
+	// Feature 15 & Level 2: Expanded terms (OR + Ranking) vs standard AND words
+	useExpansion := len(params.ExpandedTerms) > 0
+
+	var orParts []string
+	var orArgs []interface{}
+	var caseParts []string
+	var caseArgs []interface{}
+
+	if useExpansion {
+		weights := []int{100, 50, 30, 20, 15, 10, 5, 5}
+		for i, term := range params.ExpandedTerms {
+			term = strings.TrimSpace(term)
+			if term == "" {
+				continue
+			}
+			w := 5
+			if i < len(weights) {
+				w = weights[i]
+			}
+			pat := "%" + escapeLikePattern(term) + "%"
+			orParts = append(orParts, model.TableNamePhoto+".description LIKE ? ESCAPE '\\'")
+			orArgs = append(orArgs, pat)
+
+			caseParts = append(caseParts, fmt.Sprintf("CASE WHEN %s.description LIKE ? ESCAPE '\\' THEN %d ELSE 0 END", model.TableNamePhoto, w))
+			caseArgs = append(caseArgs, pat)
+		}
+	}
+
 	terms := strings.Fields(params.Query)
 
 	// Feature 17: "must have every selected tag" filtering
@@ -161,8 +189,15 @@ func (r *galleryRepository) Search(ctx context.Context, dest string, params dto.
 	applyFilters := func(do query.IPhotoDo) query.IPhotoDo {
 		do = do.Where(p.DestinationPath.In(conds...)).
 			Where(p.Status.Eq("active"))
-		for _, term := range terms {
-			do = do.Where(likeEscaped(model.TableNamePhoto+".description", "%"+escapeLikePattern(term)+"%"))
+		if useExpansion {
+			if len(orParts) > 0 {
+				orSQL := "(" + strings.Join(orParts, " OR ") + ")"
+				do = do.Where(field.NewUnsafeFieldRaw(orSQL, orArgs...))
+			}
+		} else {
+			for _, term := range terms {
+				do = do.Where(likeEscaped(model.TableNamePhoto+".description", "%"+escapeLikePattern(term)+"%"))
+			}
 		}
 		if tagSub != nil {
 			do = do.Where(gen.Columns{p.ID}.In(tagSub))
@@ -175,9 +210,16 @@ func (r *galleryRepository) Search(ctx context.Context, dest string, params dto.
 		return nil, err
 	}
 
-	photos, err := applyFilters(p.WithContext(ctx)).
-		Preload(p.PhotoTags.Tag).
-		Order(field.NewUnsafeFieldRaw("CASE WHEN photos.description != '' THEN 0 ELSE 1 END ASC"), p.BackedUpAt.Desc(), p.ID.Desc()).
+	queryDo := applyFilters(p.WithContext(ctx)).Preload(p.PhotoTags.Tag)
+	if useExpansion && len(caseParts) > 0 {
+		scoreSQL := "(" + strings.Join(caseParts, " + ") + ")"
+		scoreExpr := field.NewUnsafeFieldRaw(scoreSQL, caseArgs...)
+		queryDo = queryDo.Order(scoreExpr.Desc(), p.BackedUpAt.Desc(), p.ID.Desc())
+	} else {
+		queryDo = queryDo.Order(field.NewUnsafeFieldRaw("CASE WHEN photos.description != '' THEN 0 ELSE 1 END ASC"), p.BackedUpAt.Desc(), p.ID.Desc())
+	}
+
+	photos, err := queryDo.
 		Limit(pageSize).
 		Offset((page - 1) * pageSize).
 		Find()
@@ -208,6 +250,7 @@ func (r *galleryRepository) Search(ctx context.Context, dest string, params dto.
 		Page:          page,
 		PageSize:      pageSize,
 		TotalPages:    totalPages,
+		ExpandedTerms: params.ExpandedTerms,
 	}, nil
 }
 

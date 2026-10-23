@@ -250,6 +250,7 @@ export namespace dto {
 	    tag_ids: number[];
 	    page: number;
 	    page_size: number;
+	    expanded_terms?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new SearchParams(source);
@@ -261,6 +262,7 @@ export namespace dto {
 	        this.tag_ids = source["tag_ids"];
 	        this.page = source["page"];
 	        this.page_size = source["page_size"];
+	        this.expanded_terms = source["expanded_terms"];
 	    }
 	}
 	export class SearchResult {
@@ -270,6 +272,7 @@ export namespace dto {
 	    page: number;
 	    page_size: number;
 	    total_pages: number;
+	    expanded_terms?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new SearchResult(source);
@@ -283,6 +286,7 @@ export namespace dto {
 	        this.page = source["page"];
 	        this.page_size = source["page_size"];
 	        this.total_pages = source["total_pages"];
+	        this.expanded_terms = source["expanded_terms"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

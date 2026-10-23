@@ -117,7 +117,7 @@ func main() {
 	galleryRepo := repository.NewGalleryRepository(db)
 	aiVisionService := service.NewAiVisionService()
 	backupService := service.NewBackupService(photoRepo, tagRepo, aiVisionService)
-	galleryService := service.NewGalleryService(galleryRepo)
+	galleryService := service.NewGalleryService(galleryRepo, aiVisionService)
 
 	// 3. Create App instance with injected services
 	app := NewApp(backupService, galleryService)

@@ -377,11 +377,21 @@ async function handleRunAiAnalysis() {
       result = await (window as any).go.service.BackupService.AnalyzePhoto(path)
     }
     if (result) {
-      if (result.description) {
+      if (result.description && photo.value.id) {
         photo.value = { ...photo.value, description: result.description }
         await photoApi.updateDescription(photo.value.id, result.description)
       }
-      alert(`AI วิเคราะห์ภาพสำเร็จ!\n\nคำอธิบาย: ${result.description}\nแท็ก: ${(result.tags || []).join(', ')}`)
+      if (result.tags && Array.isArray(result.tags) && result.tags.length > 0 && photo.value.id) {
+        for (const tag of result.tags) {
+          try {
+            await photoApi.addTag(photo.value.id, tag)
+          } catch (tErr) {
+            console.warn('Failed to add tag:', tag, tErr)
+          }
+        }
+      }
+      await loadDetail()
+      alert(`AI วิเคราะห์ภาพสำเร็จ!\n\nคำอธิบาย: ${result.description || '(ไม่มี)'}\nแท็ก: ${(result.tags || []).join(', ')}`)
     } else {
       alert('ไม่สามารถวิเคราะห์ภาพได้ หรือยังไม่ได้ตั้งค่า API Key')
     }

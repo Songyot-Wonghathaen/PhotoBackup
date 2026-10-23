@@ -101,6 +101,19 @@
           {{ s }}
         </button>
       </div>
+
+      <!-- AI Expanded Terms Indicator -->
+      <div v-if="activeTab === 'desc' && expandedTerms.length > 1 && searchQuery.trim()" class="ai-expanded-row">
+        <span class="ai-expanded-badge">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+          </svg>
+          AI แตกคำค้นหาให้:
+        </span>
+        <div class="ai-term-chips">
+          <span v-for="term in expandedTerms" :key="term" class="ai-term-chip">{{ term }}</span>
+        </div>
+      </div>
     </div>
 
     <!-- Main Content Layout -->
@@ -259,6 +272,7 @@ const page = ref(1)
 const totalPages = ref(0)
 const aiProgress = ref({ current: 0, total: 0 })
 const isAiAnalyzing = ref(false)
+const expandedTerms = ref<string[]>([])
 
 const suggestions = ['แมวนอนบนโซฟา', 'ภูเขาหิมะ', 'อาหารญี่ปุ่น', 'ครอบครัวปิกนิก']
 
@@ -276,6 +290,7 @@ const emptyResultMessage = computed(() => {
 function switchTab(tab: 'desc' | 'tag') {
   if (activeTab.value === tab) return
   activeTab.value = tab
+  expandedTerms.value = []
   search(1, false)
 }
 
@@ -352,6 +367,9 @@ async function search(newPage: number, append: boolean) {
   })
   cards.value = append ? [...cards.value, ...mapped] : mapped
   total.value = result.total || 0
+  if (!append) {
+    expandedTerms.value = result.expanded_terms || []
+  }
   if (typeof result.analyzed_total === 'number') {
     analyzedTotal.value = result.analyzed_total
   }
@@ -871,6 +889,43 @@ watch(destPath, async () => {
 .suggest-chip:hover {
   background: #E2E8F0;
   color: #1E293B;
+}
+
+/* AI Expanded Search Terms Row */
+.ai-expanded-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: #F5F3FF;
+  border: 1px solid #DDD6FE;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.ai-expanded-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #6D28D9;
+  font-weight: 600;
+}
+
+.ai-term-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ai-term-chip {
+  background: #EDE9FE;
+  color: #5B21B6;
+  font-weight: 500;
+  padding: 2px 9px;
+  border-radius: 6px;
+  font-size: 12px;
 }
 
 /* Layout: Full width or With Tag Cloud Sidebar */

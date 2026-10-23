@@ -33,6 +33,7 @@ type PhotoRepository interface {
 	UpdatePhotoDescription(ctx context.Context, id int32, description string) error
 	UpdatePhotoDescriptionByFile(ctx context.Context, dest string, filename string, description string) error
 	UpdatePhotoDescriptionsInBatch(ctx context.Context, updates map[int32]string) error
+	FindPhotoByFile(ctx context.Context, dest string, filename string) (*model.Photo, error)
 	CleanPhotos(ctx context.Context) error
 	SearchPhotosByDescription(ctx context.Context, dest string, query string, limit int, offset int) ([]*model.Photo, error)
 	SearchPhotosByTag(ctx context.Context, dest string, tagName string, limit int, offset int) ([]*model.Photo, error)
@@ -279,6 +280,28 @@ func (r *photoRepository) UpdatePhotoDescriptionsInBatch(ctx context.Context, up
 		}
 		return nil
 	})
+}
+
+// FindPhotoByFile looks up a photo by destination path and filename (or filename only fallback)
+func (r *photoRepository) FindPhotoByFile(ctx context.Context, dest string, filename string) (*model.Photo, error) {
+	p := r.q.Photo
+	if dest != "" {
+		conds := destConditions(dest)
+		if len(conds) > 0 {
+			photo, err := p.WithContext(ctx).
+				Where(p.DestinationPath.In(conds...)).
+				Where(p.FileName.Eq(filename)).
+				Order(p.ID.Desc()).
+				First()
+			if err == nil && photo != nil {
+				return photo, nil
+			}
+		}
+	}
+	return p.WithContext(ctx).
+		Where(p.FileName.Eq(filename)).
+		Order(p.ID.Desc()).
+		First()
 }
 
 // CleanPhotos truncates/cleans the photos table

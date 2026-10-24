@@ -254,3 +254,9 @@ func (a *App) UpdateSystemSettings(autoAnalyze bool, primaryModel string, duplic
 func (a *App) ResetAiQuotaCooldowns() (*dto.AppSettingsDTO, error) {
 	return a.backupService.ResetAiQuotaCooldowns()
 }
+
+// RestoreDefaultProjects restores the 10 built-in default projects and API keys
+func (a *App) RestoreDefaultProjects() (*dto.AppSettingsDTO, error) {
+	return a.backupService.RestoreDefaultProjects()
+}
+

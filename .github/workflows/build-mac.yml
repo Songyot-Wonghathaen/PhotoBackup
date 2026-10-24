@@ -1,0 +1,58 @@
+name: Build macOS Application
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - build-mac
+      - develop
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Wails CLI
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: |
+          npm install --include=optional
+
+      - name: Generate static frontend
+        working-directory: ./frontend
+        run: |
+          npm run generate
+
+      - name: Build macOS Universal Application (.app)
+        run: |
+          wails build -platform darwin/universal -clean -s
+
+      - name: Package macOS App into Zip
+        run: |
+          cd build/bin
+          ditto -c -k --sequesterRsrc --keepParent PhotoVault.app PhotoVault-macOS-Universal.zip
+
+      - name: Upload macOS Application Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhotoVault-macOS-Universal
+          path: build/bin/PhotoVault-macOS-Universal.zip
+          if-no-files-found: error

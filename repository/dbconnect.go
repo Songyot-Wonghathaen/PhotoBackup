@@ -25,11 +25,20 @@ func NewDbConnection() (*gorm.DB, error) {
 	}
 	if !filepath.IsAbs(dbPath) {
 		dir, err := os.Getwd()
-		if err == nil {
+		if err == nil && dir != "/" && dir != "\\" {
 			dbPath = filepath.Join(dir, dbPath)
+		} else {
+			if cfgDir, cfgErr := os.UserConfigDir(); cfgErr == nil {
+				dbPath = filepath.Join(cfgDir, "PhotoVault", dbPath)
+			}
 		}
 	}
-	_ = os.MkdirAll(filepath.Dir(dbPath), 0755)
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		if cfgDir, cfgErr := os.UserConfigDir(); cfgErr == nil {
+			dbPath = filepath.Join(cfgDir, "PhotoVault", "database", "photo-vault.db")
+			_ = os.MkdirAll(filepath.Dir(dbPath), 0755)
+		}
+	}
 	log.Println("Database path:", dbPath)
 	database, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
 		SkipDefaultTransaction: true,

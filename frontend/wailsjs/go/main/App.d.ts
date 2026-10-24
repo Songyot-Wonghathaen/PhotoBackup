@@ -49,6 +49,8 @@ export function MovePhotos(arg1:Array<string>,arg2:boolean):Promise<dto.MoveSumm
 
 export function ResetAiQuotaCooldowns():Promise<dto.AppSettingsDTO>;
 
+export function RestoreDefaultProjects():Promise<dto.AppSettingsDTO>;
+
 export function SaveProjectApiKey(arg1:string,arg2:string,arg3:string,arg4:string):Promise<dto.AppSettingsDTO>;
 
 export function SearchPhotosByDescription(arg1:string,arg2:string,arg3:number,arg4:number):Promise<Array<model.Photo>>;

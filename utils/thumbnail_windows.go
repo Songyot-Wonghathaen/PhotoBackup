@@ -8,6 +8,9 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"os"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -72,6 +75,15 @@ type winBitmapInfoHeader struct {
 
 // GetThumbnailBytes extracts a high-quality JPEG thumbnail of any image (JPG, PNG, HEIC, RAW) using Windows Shell
 func GetThumbnailBytes(filePath string, maxDim int) ([]byte, error) {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if ext == ".jpg" || ext == ".jpeg" {
+		if fi, err := os.Stat(filePath); err == nil && fi.Size() > 0 && fi.Size() <= 65536 {
+			if raw, rErr := os.ReadFile(filePath); rErr == nil && len(raw) > 0 {
+				return raw, nil
+			}
+		}
+	}
+
 	procCoInitializeEx.Call(0, 2) // COINIT_APARTMENTTHREADED
 	defer procCoUninitialize.Call()
 
@@ -80,22 +92,22 @@ func GetThumbnailBytes(filePath string, maxDim int) ([]byte, error) {
 		return nil, err
 	}
 
-	var pFactory uintptr
+	var pFactory **[4]uintptr
 	hr, _, _ := procSHCreateItemFromParsingName.Call(
 		uintptr(unsafe.Pointer(pathPtr)),
 		0,
 		uintptr(unsafe.Pointer(&iidIShellItemImageFactory)),
 		uintptr(unsafe.Pointer(&pFactory)),
 	)
-	if hr != 0 {
+	if hr != 0 || pFactory == nil {
 		return nil, fmt.Errorf("SHCreateItem failed: 0x%x", hr)
 	}
 	defer func() {
-		vtable := *(**[3]uintptr)(unsafe.Pointer(pFactory))
-		syscall.SyscallN(vtable[2], pFactory) // Release
+		vtable := *pFactory
+		syscall.SyscallN(vtable[2], uintptr(unsafe.Pointer(pFactory))) // Release
 	}()
 
-	vtable := *(**[4]uintptr)(unsafe.Pointer(pFactory))
+	vtable := *pFactory
 	getImageProc := vtable[3]
 
 	var hBitmap uintptr
@@ -104,7 +116,7 @@ func GetThumbnailBytes(filePath string, maxDim int) ([]byte, error) {
 
 	hr, _, _ = syscall.SyscallN(
 		getImageProc,
-		pFactory,
+		uintptr(unsafe.Pointer(pFactory)),
 		*(*uintptr)(unsafe.Pointer(&size)),
 		uintptr(flags),
 		uintptr(unsafe.Pointer(&hBitmap)),

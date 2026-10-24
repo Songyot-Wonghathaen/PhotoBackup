@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"PhotoVault/controller/dto"
@@ -50,13 +51,27 @@ type MoveSummary = dto.MoveSummary
 type IntegrityResult = dto.IntegrityResult
 
 type BackupService struct {
-	ctx       context.Context
-	photoRepo repository.PhotoRepository
-	tagRepo   repository.TagRepository
-	aiVision  AiVisionService
-	source    string
-	dest      string
-	mu        sync.RWMutex
+	ctx            context.Context
+	photoRepo      repository.PhotoRepository
+	tagRepo        repository.TagRepository
+	aiVision       AiVisionService
+	source         string
+	dest           string
+	mu             sync.RWMutex
+	analyzeCancel  context.CancelFunc
+	transferMu     sync.Mutex
+	aiAnalyzeMu    sync.Mutex
+}
+
+// CancelAnalysis stops any running background AI analysis immediately.
+// Called from frontend via Wails IPC when the user dismisses the AI popup.
+func (s *BackupService) CancelAnalysis() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.analyzeCancel != nil {
+		s.analyzeCancel()
+		s.analyzeCancel = nil
+	}
 }
 
 func NewBackupService(photoRepo repository.PhotoRepository, optionalServices ...interface{}) *BackupService {
@@ -87,16 +102,46 @@ func (s *BackupService) SetAiVision(aiVision AiVisionService) {
 	s.aiVision = aiVision
 }
 
-// AnalyzePhoto allows analyzing an individual photo directly
+// AnalyzePhoto allows analyzing an individual photo directly and saving to DB if the photo exists
 func (s *BackupService) AnalyzePhoto(filePath string) (*VisionResult, error) {
 	s.mu.RLock()
 	ai := s.aiVision
+	photoRepo := s.photoRepo
+	tagRepo := s.tagRepo
 	s.mu.RUnlock()
 
 	if ai == nil {
 		ai = NewAiVisionService()
 	}
-	return ai.AnalyzePhoto(s.getCtx(), filePath)
+	ctx := s.getCtx()
+	res, err := ai.AnalyzePhoto(ctx, filePath)
+	if err == nil && res != nil {
+		tagsStr := "-"
+		if len(res.Tags) > 0 {
+			tagsStr = strings.Join(res.Tags, ", ")
+		}
+		descStr := strings.TrimSpace(res.Description)
+		if descStr == "" {
+			descStr = "(ไม่มีคำอธิบาย)"
+		}
+		log.Printf("[AI-Vision] %s -> Tags: [%s] | คำอธิบาย: %s", filepath.Base(filePath), tagsStr, descStr)
+
+		// Feature 13: บันทึกคำอธิบายและ Tag ลง DB ทันทีเมื่อวิเคราะห์ภาพสำเร็จ
+		if photoRepo != nil {
+			dest := filepath.Dir(filePath)
+			filename := filepath.Base(filePath)
+			photo, findErr := photoRepo.FindPhotoByFile(ctx, dest, filename)
+			if findErr == nil && photo != nil && photo.ID > 0 {
+				if res.Description != "" {
+					_ = photoRepo.UpdatePhotoDescription(ctx, photo.ID, res.Description)
+				}
+				if tagRepo != nil && len(res.Tags) > 0 {
+					_ = tagRepo.AddPhotoTagsInBatch(ctx, map[int32][]string{photo.ID: res.Tags}, "ai")
+				}
+			}
+		}
+	}
+	return res, err
 }
 
 func (s *BackupService) SetContext(ctx context.Context) {
@@ -156,7 +201,8 @@ func (s *BackupService) SetDest(dest string) (*IntegrityResult, error) {
 	// Feature 5: Immediate integrity scan upon selecting destination
 	integrity, err := s.CheckIntegrity(dest)
 	if err != nil {
-		return nil, err
+		log.Printf("[BackupService] ⚠️ Integrity check warning for %s: %v", dest, err)
+		return &IntegrityResult{IsExactMatch: true}, nil
 	}
 	return &integrity, nil
 }
@@ -304,8 +350,32 @@ func (s *BackupService) ListDB(destPath string) ([]*modelGen.Photo, error) {
 	return s.photoRepo.GetActivePhotosByDest(s.getCtx(), destPath)
 }
 
-// Feature 6, 7, 8, 9, 11: Move with Worker Pool, timer, cross-drive copy, duplicate check, batch insert
+// ListAllDB lists all photo records (active, missing, deleted) for destPath (Feature 20 & 24)
+func (s *BackupService) ListAllDB(destPath string) ([]*modelGen.Photo, error) {
+	if destPath == "" {
+		destPath = s.GetDest()
+	}
+	if destPath == "" {
+		return nil, errors.New("destination is not set! Please set destination directory first")
+	}
+	return s.photoRepo.GetAllPhotosByDest(s.getCtx(), destPath)
+}
+
+
+// Backup copies selected or all files to destination (Feature 6: Backup / Copy - preserves source)
+func (s *BackupService) Backup(targets []string, isAll bool) (MoveSummary, error) {
+	return s.processTransfer(targets, isAll, false)
+}
+
+// Move moves selected or all files to destination (Feature 6: Move - removes source)
 func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) {
+	return s.processTransfer(targets, isAll, true)
+}
+
+func (s *BackupService) processTransfer(targets []string, isAll bool, deleteSource bool) (MoveSummary, error) {
+	s.transferMu.Lock()
+	defer s.transferMu.Unlock()
+
 	src := s.GetSource()
 	dst := s.GetDest()
 
@@ -383,8 +453,24 @@ func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) 
 		return summary, nil
 	}
 
+	s.mu.RLock()
+	aiSvc := s.aiVision
+	s.mu.RUnlock()
+
+	copyWorkers := 16
+	duplicateGuard := true
+	autoAnalyze := true
+	if cfgAi, ok := aiSvc.(ConfigurableAiVisionService); ok {
+		copyWorkers = cfgAi.GetCopyWorkers()
+		duplicateGuard = cfgAi.IsDuplicateGuardEnabled()
+		autoAnalyze = cfgAi.IsAutoAnalyzeEnabled()
+	}
+
 	totalToMove := len(filesToMove)
-	numWorkers := 16
+	numWorkers := copyWorkers
+	if numWorkers < 1 {
+		numWorkers = 16
+	}
 	if numWorkers > totalToMove {
 		numWorkers = totalToMove
 	}
@@ -419,7 +505,16 @@ func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) 
 				srcPath := filepath.Join(src, fname)
 				dstPath := filepath.Join(dst, fname)
 
-				shaHash, size, err := streamCopyAndRemoveFile(srcPath, dstPath, buf)
+				var shaHash string
+				var size int64
+				var err error
+
+				if deleteSource {
+					shaHash, size, err = streamMoveFile(srcPath, dstPath, buf)
+				} else {
+					shaHash, size, err = streamCopyFile(srcPath, dstPath, buf)
+				}
+
 				resultChan <- moveResult{
 					filename:  fname,
 					sha256:    shaHash,
@@ -448,7 +543,7 @@ func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) 
 			summary.FailedList = append(summary.FailedList, fmt.Sprintf("%s (%v)", res.filename, res.err))
 		} else {
 			// Check if duplicate SHA256 was found in DB
-			if res.sha256 != "" && shaMap[res.sha256] {
+			if duplicateGuard && res.sha256 != "" && shaMap[res.sha256] {
 				// Duplicate content already exists in DB
 				summary.SkippedFiles++
 				summary.SkippedList = append(summary.SkippedList, fmt.Sprintf("%s (duplicate content sha256)", res.filename))
@@ -475,98 +570,312 @@ func (s *BackupService) Move(targets []string, isAll bool) (MoveSummary, error) 
 	if len(movedPhotos) > 0 {
 		_ = s.photoRepo.AddPhotosInBatch(s.getCtx(), movedPhotos)
 
-		// Part C (Features 12, 13, 14): AI Vision Analysis on Backup
+		// Part C (Features 12, 13, 14): AI Vision Analysis runs in background
+		// so Move returns immediately after files are copied and DB records inserted.
 		s.mu.RLock()
 		ai := s.aiVision
 		tagRepo := s.tagRepo
 		s.mu.RUnlock()
 
-	if ai != nil && ai.IsAvailable() {
-			for idx, p := range movedPhotos {
-				if !isImageFile(p.FileName) {
-					continue
-				}
-				fullDst := filepath.Join(dst, p.FileName)
-				visionRes, err := ai.AnalyzePhoto(s.getCtx(), fullDst)
-				if err != nil {
-					// Feature 14: Handle failure gracefully, leave description blank and continue
-					continue
-				}
-
-				// Feature 13: Save Description and Tags to DB
-				if visionRes != nil {
-					if visionRes.Description != "" {
-						// Use filename+dest query (p.ID is 0 after CreateInBatches)
-						dbErr := s.photoRepo.UpdatePhotoDescriptionByFile(s.getCtx(), dst, p.FileName, visionRes.Description)
-						if dbErr != nil {
-							log.Printf("[AI-Vision] ⚠️ บันทึก description ล้มเหลวสำหรับ %s: %v", p.FileName, dbErr)
-						} else {
-							log.Printf("[AI-Vision] 💾 บันทึก description ลง DB สำเร็จ: %s", p.FileName)
-						}
-					}
-
-					if tagRepo != nil && len(visionRes.Tags) > 0 {
-						// Fetch the real DB record to get actual ID for photo_tags
-						dbPhotos, qErr := s.photoRepo.GetActivePhotosByDest(s.getCtx(), dst)
-						var realID int32
-						if qErr == nil {
-							for _, dbP := range dbPhotos {
-								if strings.EqualFold(dbP.FileName, p.FileName) {
-									realID = dbP.ID
-									break
-								}
-							}
-						}
-						if realID > 0 {
-							createdTags, tagErr := tagRepo.FindOrCreateTags(s.getCtx(), visionRes.Tags)
-							if tagErr == nil && len(createdTags) > 0 {
-								_ = tagRepo.AddPhotoTags(s.getCtx(), realID, createdTags, "ai")
-								log.Printf("[AI-Vision] 🏷️ บันทึก %d tags ลง DB สำเร็จ: %s", len(createdTags), p.FileName)
-							}
-						} else {
-							log.Printf("[AI-Vision] ⚠️ ไม่พบ ID ใน DB สำหรับ %s — ข้าม tag insert", p.FileName)
-						}
-					}
-				}
-
-	// Emit progress event to Frontend
-				if s.ctx != nil {
-					runtime.EventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
-						"current":  idx + 1,
-						"total":    len(movedPhotos),
-						"filename": p.FileName,
-					})
-				}
-
-				// Polite pause to stay smoothly within the free tier rate limit
-				// 2 seconds = ~30 requests/minute, safely under 15 req/min free tier limit
-				if idx < len(movedPhotos)-1 {
-					time.Sleep(2 * time.Second)
-				}
-			}
+		if autoAnalyze && ai != nil && ai.IsAvailable() {
+			analyzeCtx, cancel := context.WithCancel(s.getCtx())
+			s.mu.Lock()
+			s.analyzeCancel = cancel
+			s.mu.Unlock()
+			go s.analyzeMovedPhotos(analyzeCtx, dst, movedPhotos, ai, tagRepo)
 		}
 	}
 
 	return summary, nil
 }
 
-// streamCopyAndRemoveFile implements Feature 6:
-// Tries os.Rename first. If across drives, fallback to stream copy buffer and delete source.
-func streamCopyAndRemoveFile(srcPath, dstPath string, buffer []byte) (string, int64, error) {
+// analyzeMovedPhotos runs AI vision analysis in the background in strict FIFO order (never jumps the queue).
+func (s *BackupService) analyzeMovedPhotos(ctx context.Context, dst string, photos []*modelGen.Photo, ai AiVisionService, tagRepo repository.TagRepository) {
+	s.aiAnalyzeMu.Lock()
+	defer s.aiAnalyzeMu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		s.analyzeCancel = nil
+		s.mu.Unlock()
+	}()
+
+	var validPhotos []*modelGen.Photo
+	for _, p := range photos {
+		if isImageFile(p.FileName) {
+			validPhotos = append(validPhotos, p)
+		}
+	}
+	totalPhotos := len(validPhotos)
+	if totalPhotos == 0 {
+		return
+	}
+
+	startAnalyze := time.Now()
+
+	// Build a filename→ID map using existing IDs from movedPhotos first,
+	// then fill from GetAllPhotosByDest so both active and checked photos are found
+	idMap := make(map[string]int32, totalPhotos)
+	for _, p := range photos {
+		if p != nil && p.ID > 0 {
+			idMap[strings.ToLower(p.FileName)] = p.ID
+		}
+	}
+	dbPhotos, qErr := s.photoRepo.GetAllPhotosByDest(ctx, dst)
+	if qErr == nil {
+		for _, dbP := range dbPhotos {
+			if dbP != nil && dbP.ID > 0 {
+				idMap[strings.ToLower(dbP.FileName)] = dbP.ID
+			}
+		}
+	}
+
+	batchAi, isBatchCapable := ai.(BatchAiVisionService)
+	batchSize := 1
+	numWorkers := 4
+	if isBatchCapable {
+		batchSize = batchAi.BatchSize()
+		if batchSize < 1 {
+			batchSize = 20
+		}
+		numWorkers = batchAi.WorkerConcurrency()
+		if numWorkers < 1 {
+			numWorkers = 8
+		}
+	}
+
+	type photoBatch struct {
+		items []*modelGen.Photo
+	}
+
+	var batches []photoBatch
+	var allBatchPaths [][]string
+	for i := 0; i < totalPhotos; i += batchSize {
+		end := i + batchSize
+		if end > totalPhotos {
+			end = totalPhotos
+		}
+		slice := validPhotos[i:end]
+		batches = append(batches, photoBatch{items: slice})
+		if isBatchCapable && len(slice) > 1 {
+			paths := make([]string, len(slice))
+			for j, p := range slice {
+				paths[j] = filepath.Join(dst, p.FileName)
+			}
+			allBatchPaths = append(allBatchPaths, paths)
+		}
+	}
+
+	if isBatchCapable && len(allBatchPaths) > 0 {
+		go batchAi.PrebuildBatchCollages(ctx, allBatchPaths)
+	}
+
+	if numWorkers > len(batches) {
+		numWorkers = len(batches)
+	}
+
+	log.Printf("[AI-Vision] เริ่มต้นวิเคราะห์ความเร็วสูง %d รูป (%d Batches, Batch ละ %d รูป, %d Workers)", totalPhotos, len(batches), batchSize, numWorkers)
+
+	batchCh := make(chan photoBatch, len(batches))
+	for _, b := range batches {
+		batchCh <- b
+	}
+	close(batchCh)
+
+	var completedCount int32
+	var successBatches int32
+	var dbWriteMu sync.Mutex
+	var firstErrMu sync.Mutex
+	var firstErr error
+	var firstErrFile string
+
+	var wg sync.WaitGroup
+	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+		go func(wID int) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[AI-Vision] Worker %d กู้คืนจากข้อผิดพลาด: %v", wID, r)
+				}
+			}()
+
+			// Stagger initial worker start by 90ms per worker so requests flow in a smooth continuous pipeline
+			if wID > 0 {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Duration(wID*90) * time.Millisecond):
+				}
+			}
+
+			for batch := range batchCh {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				paths := make([]string, len(batch.items))
+				for i, p := range batch.items {
+					paths[i] = filepath.Join(dst, p.FileName)
+				}
+
+				var results []*VisionResult
+				var err error
+				for retry := 0; retry < 4; retry++ {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+
+					if isBatchCapable && len(paths) > 1 {
+						results, err = batchAi.AnalyzePhotoBatch(ctx, paths)
+					} else {
+						res, singleErr := ai.AnalyzePhoto(ctx, paths[0])
+						if singleErr == nil {
+							results = []*VisionResult{res}
+							err = nil
+						} else {
+							err = singleErr
+						}
+					}
+
+					if err == nil && len(results) > 0 {
+						break
+					}
+					backoff := time.Duration(retry+1) * 400 * time.Millisecond
+					log.Printf("[AI-Vision] กำลังลอง Batch ใหม่ (%s) รอบที่ %d/4 (พัก %v)...", batch.items[0].FileName, retry+1, backoff)
+					time.Sleep(backoff)
+				}
+
+				// Fallback rescue: if a multi-photo batch still failed, split into two half-batches to rescue photos
+				if err != nil && isBatchCapable && len(paths) > 2 {
+					mid := len(paths) / 2
+					res1, err1 := batchAi.AnalyzePhotoBatch(ctx, paths[:mid])
+					res2, err2 := batchAi.AnalyzePhotoBatch(ctx, paths[mid:])
+					if err1 == nil || err2 == nil {
+						results = make([]*VisionResult, len(paths))
+						if err1 == nil {
+							copy(results[:mid], res1)
+						}
+						if err2 == nil {
+							copy(results[mid:], res2)
+						}
+						err = nil
+					}
+				}
+
+				if err != nil {
+					log.Printf("[AI-Vision] Batch วิเคราะห์ล้มเหลวถาวร (%s): %v", batch.items[0].FileName, err)
+					firstErrMu.Lock()
+					if firstErr == nil {
+						firstErr = err
+						firstErrFile = batch.items[0].FileName
+					}
+					firstErrMu.Unlock()
+				} else {
+					atomic.AddInt32(&successBatches, 1)
+
+					descUpdates := make(map[int32]string, len(batch.items))
+					tagUpdates := make(map[int32][]string, len(batch.items))
+
+					for i, p := range batch.items {
+						if i >= len(results) || results[i] == nil {
+							continue
+						}
+						vr := results[i]
+
+						tagsStr := "-"
+						if len(vr.Tags) > 0 {
+							tagsStr = strings.Join(vr.Tags, ", ")
+						}
+						descStr := strings.TrimSpace(vr.Description)
+						if descStr == "" {
+							descStr = "(ไม่มีคำอธิบาย)"
+						}
+						log.Printf("[AI-Vision] %s -> Tags: [%s] | คำอธิบาย: %s", p.FileName, tagsStr, descStr)
+
+						realID := idMap[strings.ToLower(p.FileName)]
+						if realID <= 0 {
+							// Fallback lookup directly
+							if found, fErr := s.photoRepo.FindPhotoByFile(ctx, dst, p.FileName); fErr == nil && found != nil && found.ID > 0 {
+								realID = found.ID
+								idMap[strings.ToLower(p.FileName)] = realID
+							}
+						}
+						if realID <= 0 {
+							if vr.Description != "" {
+								_ = s.photoRepo.UpdatePhotoDescriptionByFile(ctx, dst, p.FileName, vr.Description)
+							}
+							continue
+						}
+						if vr.Description != "" {
+							descUpdates[realID] = vr.Description
+						}
+						if len(vr.Tags) > 0 {
+							tagUpdates[realID] = vr.Tags
+						}
+					}
+
+					if len(descUpdates) > 0 || (tagRepo != nil && len(tagUpdates) > 0) {
+						dbWriteMu.Lock()
+						if len(descUpdates) > 0 {
+							_ = s.photoRepo.UpdatePhotoDescriptionsInBatch(ctx, descUpdates)
+						}
+						if tagRepo != nil && len(tagUpdates) > 0 {
+							_ = tagRepo.AddPhotoTagsInBatch(ctx, tagUpdates, "ai")
+						}
+						dbWriteMu.Unlock()
+					}
+				}
+
+				// Always increment completedCount so UI progress never gets stuck below totalPhotos
+				done := int(atomic.AddInt32(&completedCount, int32(len(batch.items))))
+				lastFile := batch.items[len(batch.items)-1].FileName
+				safeEventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
+					"current":  done,
+					"total":    totalPhotos,
+					"filename": lastFile,
+				})
+			}
+		}(w)
+	}
+
+	wg.Wait()
+
+	if atomic.LoadInt32(&successBatches) == 0 && firstErr != nil {
+		safeEventsEmit(s.ctx, "ai_analysis_error", map[string]interface{}{
+			"filename": firstErrFile,
+			"error":    firstErr.Error(),
+		})
+		return
+	}
+
+	lastFile := ""
+	if len(validPhotos) > 0 {
+		lastFile = validPhotos[len(validPhotos)-1].FileName
+	}
+	safeEventsEmit(s.ctx, "ai_analysis_progress", map[string]interface{}{
+		"current":  totalPhotos,
+		"total":    totalPhotos,
+		"filename": lastFile,
+		"done":     true,
+	})
+
+	log.Printf("[AI-Vision] วิเคราะห์เสร็จสิ้น %d รูป ใช้เวลาทั้งหมด %v", totalPhotos, time.Since(startAnalyze))
+}
+
+// streamCopyFile streams the file content to destination and computes SHA-256 simultaneously,
+// preserving the original source file (Copy instead of Move).
+func streamCopyFile(srcPath, dstPath string, buffer []byte) (string, int64, error) {
 	fi, err := os.Stat(srcPath)
 	if err != nil {
 		return "", 0, err
 	}
 	size := fi.Size()
 
-	// Attempt fast Rename first
-	renameErr := os.Rename(srcPath, dstPath)
-	if renameErr == nil {
-		hash := fastFileHash(dstPath)
-		return hash, size, nil
-	}
-
-	// Fallback to cross-drive stream copy buffer
 	srcFile, err := os.Open(srcPath)
 	if err != nil {
 		return "", 0, err
@@ -577,6 +886,48 @@ func streamCopyAndRemoveFile(srcPath, dstPath string, buffer []byte) (string, in
 	if err != nil {
 		return "", 0, err
 	}
+	defer dstFile.Close()
+
+	hasher := sha256.New()
+	writer := io.MultiWriter(dstFile, hasher)
+
+	_, copyErr := io.CopyBuffer(writer, srcFile, buffer)
+	if copyErr != nil {
+		dstFile.Close()
+		_ = os.Remove(dstPath)
+		return "", 0, copyErr
+	}
+
+	return hex.EncodeToString(hasher.Sum(nil)), size, nil
+}
+
+// streamMoveFile implements Feature 6 (Move):
+// Tries os.Rename first. If across drives, fallback to stream copy buffer and remove source file.
+func streamMoveFile(srcPath, dstPath string, buffer []byte) (string, int64, error) {
+	fi, err := os.Stat(srcPath)
+	if err != nil {
+		return "", 0, err
+	}
+	size := fi.Size()
+
+	// Attempt fast Rename first (works on same drive/filesystem)
+	renameErr := os.Rename(srcPath, dstPath)
+	if renameErr == nil {
+		hash := fastFileHash(dstPath)
+		return hash, size, nil
+	}
+
+	// Fallback to cross-drive stream copy buffer and remove source
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return "", 0, err
+	}
+
+	dstFile, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		srcFile.Close()
+		return "", 0, err
+	}
 
 	hasher := sha256.New()
 	writer := io.MultiWriter(dstFile, hasher)
@@ -585,6 +936,7 @@ func streamCopyAndRemoveFile(srcPath, dstPath string, buffer []byte) (string, in
 	dstFile.Close()
 
 	if copyErr != nil {
+		srcFile.Close()
 		_ = os.Remove(dstPath)
 		return "", 0, copyErr
 	}
@@ -611,6 +963,7 @@ func fastFileHash(path string) string {
 // CheckIntegrity implements Feature 5 & 21:
 // Compares database records with physical files on disk, updates 'missing' status in DB if not found
 func (s *BackupService) CheckIntegrity(destPath string) (IntegrityResult, error) {
+	start := time.Now()
 	if destPath == "" {
 		destPath = s.GetDest()
 	}
@@ -618,7 +971,7 @@ func (s *BackupService) CheckIntegrity(destPath string) (IntegrityResult, error)
 		return IntegrityResult{}, errors.New("destination is not set! Please set destination directory first")
 	}
 
-	dbPhotos, err := s.photoRepo.GetActivePhotosByDest(s.getCtx(), destPath)
+	allPhotos, err := s.photoRepo.GetAllPhotosByDest(s.getCtx(), destPath)
 	if err != nil {
 		return IntegrityResult{}, err
 	}
@@ -634,24 +987,48 @@ func (s *BackupService) CheckIntegrity(destPath string) (IntegrityResult, error)
 	}
 
 	var missingInDisk []string
+	var toActive []string
+	var toMissing []string
 	matched := 0
 
-	for _, p := range dbPhotos {
+	for _, p := range allPhotos {
+		if p.Status == "deleted" {
+			// Intentionally deleted photos are not counted as missing
+			continue
+		}
 		if diskMap[strings.ToLower(p.FileName)] {
 			matched++
+			if p.Status == "missing" {
+				toActive = append(toActive, p.FileName)
+			}
 		} else {
 			missingInDisk = append(missingInDisk, p.FileName)
-			// Update status in DB to 'missing'
-			_ = s.photoRepo.MarkPhotoMissing(s.getCtx(), destPath, p.FileName)
+			if p.Status != "missing" {
+				toMissing = append(toMissing, p.FileName)
+			}
 		}
 	}
 
+	// High Performance: Atomic Batch Status Synchronization in SQLite
+	if len(toActive) > 0 {
+		_ = s.photoRepo.MarkPhotosActiveInBatch(s.getCtx(), destPath, toActive)
+	}
+	if len(toMissing) > 0 {
+		_ = s.photoRepo.MarkPhotosMissingInBatch(s.getCtx(), destPath, toMissing)
+	}
+
+	duration := time.Since(start)
+	ms := duration.Milliseconds()
+	formattedDuration := fmt.Sprintf("%.1f ms", float64(duration.Microseconds())/1000.0)
+
 	result := IntegrityResult{
-		TotalDB:       len(dbPhotos),
-		TotalDisk:     len(diskFiles),
-		MissingInDisk: missingInDisk,
-		MatchedCount:  matched,
-		IsExactMatch:  len(missingInDisk) == 0,
+		TotalDB:           len(allPhotos),
+		TotalDisk:         len(diskFiles),
+		MissingInDisk:     missingInDisk,
+		MatchedCount:      matched,
+		IsExactMatch:      len(missingInDisk) == 0,
+		DurationMs:        ms,
+		DurationFormatted: formattedDuration,
 	}
 
 	if len(missingInDisk) > 0 {
@@ -663,42 +1040,84 @@ func (s *BackupService) CheckIntegrity(destPath string) (IntegrityResult, error)
 	return result, nil
 }
 
-// Delete removes files from destination disk and sets status = 'deleted' in DB
+// Delete removes files from destination disk and sets status = 'deleted' in DB (Feature 23 & 25)
 func (s *BackupService) Delete(targets []string, isAll bool) (int, error) {
-	dst := s.GetDest()
-	if dst == "" {
+	return s.DeleteFromDest(s.GetDest(), targets, isAll)
+}
+
+// DeleteFromDest removes files from the given destination disk and sets status = 'deleted' in DB (Feature 23 & 25)
+// Uses Concurrency Worker Pool (16 goroutines) for parallel disk deletion and atomic batch status update in DB.
+func (s *BackupService) DeleteFromDest(destPath string, targets []string, isAll bool) (int, error) {
+	if destPath == "" {
+		destPath = s.GetDest()
+	}
+	if destPath == "" {
 		return 0, errors.New("destination is not set! Please set destination directory first")
 	}
 
-	deletedCount := 0
-
 	if isAll {
-		diskFiles, _ := listDirectoryFiles(dst)
+		diskFiles, _ := listDirectoryFiles(destPath)
+		var deletedCount atomic.Int64
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 16)
+
 		for _, f := range diskFiles {
-			p := filepath.Join(dst, f)
-			if err := os.Remove(p); err == nil {
-				deletedCount++
-			}
+			wg.Add(1)
+			go func(fileName string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+
+				p := filepath.Join(destPath, fileName)
+				if err := os.Remove(p); err == nil {
+					deletedCount.Add(1)
+				}
+			}(f)
 		}
+		wg.Wait()
+
 		// Soft-delete in DB (update status = 'deleted' to preserve history)
-		_, _ = s.photoRepo.MarkAllPhotosDeleted(s.getCtx(), dst)
-		return deletedCount, nil
+		_, _ = s.photoRepo.MarkAllPhotosDeleted(s.getCtx(), destPath)
+		return int(deletedCount.Load()), nil
 	}
 
+	// Filter valid non-empty targets
+	var validTargets []string
 	for _, fname := range targets {
 		fname = strings.TrimSpace(fname)
-		if fname == "" {
-			continue
+		if fname != "" {
+			validTargets = append(validTargets, fname)
 		}
-		p := filepath.Join(dst, fname)
-		if err := os.Remove(p); err == nil {
-			deletedCount++
-		}
-		_, _ = s.photoRepo.MarkPhotoDeleted(s.getCtx(), dst, fname)
 	}
 
-	return deletedCount, nil
+	if len(validTargets) == 0 {
+		return 0, nil
+	}
+
+	var deletedCount atomic.Int64
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 16)
+
+	for _, fname := range validTargets {
+		wg.Add(1)
+		go func(fileName string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			p := filepath.Join(destPath, fileName)
+			if err := os.Remove(p); err == nil {
+				deletedCount.Add(1)
+			}
+		}(fname)
+	}
+	wg.Wait()
+
+	// Atomic batch update status = 'deleted' in DB
+	_, _ = s.photoRepo.MarkPhotosDeletedInBatch(s.getCtx(), destPath, validTargets)
+	return int(deletedCount.Load()), nil
 }
+
 
 func (s *BackupService) CleanAll() error {
 	s.mu.Lock()
@@ -747,3 +1166,92 @@ func (s *BackupService) GetTagsWithCount(dest string) ([]repository.TagCount, er
 	}
 	return s.photoRepo.GetTagsWithCount(s.getCtx(), dest)
 }
+
+func (s *BackupService) getConfigurableAi() ConfigurableAiVisionService {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.aiVision == nil {
+		s.aiVision = NewAiVisionService()
+	}
+	if cfg, ok := s.aiVision.(ConfigurableAiVisionService); ok {
+		return cfg
+	}
+	return nil
+}
+
+// GetAppSettings returns current system settings and multi-project API pool status
+func (s *BackupService) GetAppSettings() (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.GetAppSettings(), nil
+}
+
+// SaveProjectApiKey adds a new project + API key, or updates an existing project with a new API key
+func (s *BackupService) SaveProjectApiKey(projectID, projectName, projectNumber, apiKey string) (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.SaveProjectApiKey(projectID, projectName, projectNumber, apiKey)
+}
+
+// ToggleProjectApiKey enables or disables a specific project's API key in the pool
+func (s *BackupService) ToggleProjectApiKey(projectID string, enabled bool) (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.ToggleProjectApiKey(projectID, enabled)
+}
+
+// DeleteProjectApiKey deletes a project entry from the pool
+func (s *BackupService) DeleteProjectApiKey(projectID string) (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.DeleteProjectApiKey(projectID)
+}
+
+// UpdateSystemSettings updates general backup and AI settings
+func (s *BackupService) UpdateSystemSettings(autoAnalyze bool, primaryModel string, duplicateGuard bool, copyWorkers int) (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.UpdateSystemSettings(autoAnalyze, primaryModel, duplicateGuard, copyWorkers)
+}
+
+// ResetAiQuotaCooldowns clears all temporary RPM and daily RPD cooldowns across all projects
+func (s *BackupService) ResetAiQuotaCooldowns() (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.ResetQuotaCooldowns()
+}
+
+// RestoreDefaultProjects restores the 10 built-in default projects and API keys
+func (s *BackupService) RestoreDefaultProjects() (*dto.AppSettingsDTO, error) {
+	cfg := s.getConfigurableAi()
+	if cfg == nil {
+		return nil, errors.New("AI Vision service is not configurable")
+	}
+	return cfg.RestoreDefaultProjects()
+}
+
+func safeEventsEmit(ctx context.Context, eventName string, data ...interface{}) {
+	if ctx == nil {
+		return
+	}
+	if ctx.Value("frontend") == nil && ctx.Value("events") == nil && ctx.Value("app") == nil {
+		return
+	}
+	defer func() {
+		_ = recover()
+	}()
+	runtime.EventsEmit(ctx, eventName, data...)
+}
+

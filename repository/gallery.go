@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -82,12 +83,10 @@ func dedupeIDs(ids []int32) []int32 {
 	return result
 }
 
-// thumbnailURL builds the ID-based thumbnail endpoint URL. Using the photo ID
-// lets the Go asset handler resolve and validate the file in both Wails dev and
-// production modes; the legacy /api/thumbnail endpoint is handled by Nuxt in
-// dev mode and returns HTML instead of image bytes.
-func thumbnailURL(photoID int32) string {
-	return fmt.Sprintf("/thumb/%d", photoID)
+// thumbnailURL builds the path-based thumbnail endpoint URL served by the
+// asset handler in main.go (/api/thumbnail?path=<full path>).
+func thumbnailURL(fullPath string) string {
+	return "/api/thumbnail?path=" + url.QueryEscape(fullPath)
 }
 
 func photoTagNames(photo *model.Photo) []string {
@@ -110,7 +109,7 @@ func toPhotoListItem(photo *model.Photo) dto.PhotoListItem {
 		ID:          photo.ID,
 		FileName:    photo.FileName,
 		FullPath:    fullPath,
-		ThumbURL:    thumbnailURL(photo.ID),
+		ThumbURL:    thumbnailURL(fullPath),
 		Description: photo.Description,
 		Tags:        photoTagNames(photo),
 		BackedUpAt:  photo.BackedUpAt.Format("2006-01-02 15:04:05"),
@@ -141,7 +140,34 @@ func (r *galleryRepository) Search(ctx context.Context, dest string, params dto.
 		}, nil
 	}
 
-	// Feature 15: whitespace-separated words are combined with AND
+	// Feature 15 & Level 2: Expanded terms (OR + Ranking) vs standard AND words
+	useExpansion := len(params.ExpandedTerms) > 0
+
+	var orParts []string
+	var orArgs []interface{}
+	var caseParts []string
+	var caseArgs []interface{}
+
+	if useExpansion {
+		weights := []int{100, 50, 30, 20, 15, 10, 5, 5}
+		for i, term := range params.ExpandedTerms {
+			term = strings.TrimSpace(term)
+			if term == "" {
+				continue
+			}
+			w := 5
+			if i < len(weights) {
+				w = weights[i]
+			}
+			pat := "%" + escapeLikePattern(term) + "%"
+			orParts = append(orParts, model.TableNamePhoto+".description LIKE ? ESCAPE '\\'")
+			orArgs = append(orArgs, pat)
+
+			caseParts = append(caseParts, fmt.Sprintf("CASE WHEN %s.description LIKE ? ESCAPE '\\' THEN %d ELSE 0 END", model.TableNamePhoto, w))
+			caseArgs = append(caseArgs, pat)
+		}
+	}
+
 	terms := strings.Fields(params.Query)
 
 	// Feature 17: "must have every selected tag" filtering
@@ -163,8 +189,15 @@ func (r *galleryRepository) Search(ctx context.Context, dest string, params dto.
 	applyFilters := func(do query.IPhotoDo) query.IPhotoDo {
 		do = do.Where(p.DestinationPath.In(conds...)).
 			Where(p.Status.Eq("active"))
-		for _, term := range terms {
-			do = do.Where(likeEscaped(model.TableNamePhoto+".description", "%"+escapeLikePattern(term)+"%"))
+		if useExpansion {
+			if len(orParts) > 0 {
+				orSQL := "(" + strings.Join(orParts, " OR ") + ")"
+				do = do.Where(field.NewUnsafeFieldRaw(orSQL, orArgs...))
+			}
+		} else {
+			for _, term := range terms {
+				do = do.Where(likeEscaped(model.TableNamePhoto+".description", "%"+escapeLikePattern(term)+"%"))
+			}
 		}
 		if tagSub != nil {
 			do = do.Where(gen.Columns{p.ID}.In(tagSub))
@@ -177,9 +210,16 @@ func (r *galleryRepository) Search(ctx context.Context, dest string, params dto.
 		return nil, err
 	}
 
-	photos, err := applyFilters(p.WithContext(ctx)).
-		Preload(p.PhotoTags.Tag).
-		Order(p.BackedUpAt.Desc(), p.ID.Desc()).
+	queryDo := applyFilters(p.WithContext(ctx)).Preload(p.PhotoTags.Tag)
+	if useExpansion && len(caseParts) > 0 {
+		scoreSQL := "(" + strings.Join(caseParts, " + ") + ")"
+		scoreExpr := field.NewUnsafeFieldRaw(scoreSQL, caseArgs...)
+		queryDo = queryDo.Order(scoreExpr.Desc(), p.BackedUpAt.Desc(), p.ID.Desc())
+	} else {
+		queryDo = queryDo.Order(field.NewUnsafeFieldRaw("CASE WHEN photos.description != '' THEN 0 ELSE 1 END ASC"), p.BackedUpAt.Desc(), p.ID.Desc())
+	}
+
+	photos, err := queryDo.
 		Limit(pageSize).
 		Offset((page - 1) * pageSize).
 		Find()
@@ -197,12 +237,20 @@ func (r *galleryRepository) Search(ctx context.Context, dest string, params dto.
 		totalPages = int((total + int64(pageSize) - 1) / int64(pageSize))
 	}
 
+	analyzedTotal, _ := p.WithContext(ctx).
+		Where(p.DestinationPath.In(conds...)).
+		Where(p.Status.Eq("active")).
+		Where(p.Description.Neq("")).
+		Count()
+
 	return &dto.SearchResult{
-		Items:      items,
-		Total:      total,
-		Page:       page,
-		PageSize:   pageSize,
-		TotalPages: totalPages,
+		Items:         items,
+		Total:         total,
+		AnalyzedTotal: analyzedTotal,
+		Page:          page,
+		PageSize:      pageSize,
+		TotalPages:    totalPages,
+		ExpandedTerms: params.ExpandedTerms,
 	}, nil
 }
 
@@ -241,6 +289,7 @@ func (r *galleryRepository) TagCloud(ctx context.Context, dest string, limit int
 	defer rows.Close()
 
 	items := make([]dto.TagItem, 0)
+	seenNameIndex := make(map[string]int)
 	for rows.Next() {
 		var id int32
 		var name string
@@ -248,7 +297,17 @@ func (r *galleryRepository) TagCloud(ctx context.Context, dest string, limit int
 		if err := rows.Scan(&id, &name, &count); err != nil {
 			return nil, err
 		}
-		items = append(items, dto.TagItem{ID: id, Name: name, Count: int(count)})
+		cleanName := strings.TrimSpace(name)
+		if cleanName == "" {
+			continue
+		}
+		lower := strings.ToLower(cleanName)
+		if idx, exists := seenNameIndex[lower]; exists {
+			items[idx].Count += int(count)
+			continue
+		}
+		seenNameIndex[lower] = len(items)
+		items = append(items, dto.TagItem{ID: id, Name: cleanName, Count: int(count)})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -269,12 +328,18 @@ func (r *galleryRepository) GetByID(ctx context.Context, id int32) (*dto.PhotoDe
 	return r.toPhotoDetail(ctx, photo)
 }
 
-// FindActiveByID returns the active photo row by ID (used by the image server)
+// FindActiveByID returns the photo row by ID (used by the image server)
 func (r *galleryRepository) FindActiveByID(ctx context.Context, id int32) (*model.Photo, error) {
 	p := r.q.Photo
-	return p.WithContext(ctx).
+	photo, err := p.WithContext(ctx).
 		Where(p.ID.Eq(id)).
 		Where(p.Status.Eq("active")).
+		First()
+	if err == nil && photo != nil {
+		return photo, nil
+	}
+	return p.WithContext(ctx).
+		Where(p.ID.Eq(id)).
 		First()
 }
 
@@ -308,7 +373,7 @@ func (r *galleryRepository) toPhotoDetail(ctx context.Context, photo *model.Phot
 		FileName:        photo.FileName,
 		DestinationPath: photo.DestinationPath,
 		FullPath:        fullPath,
-		ThumbURL:        thumbnailURL(photo.ID),
+		ThumbURL:        thumbnailURL(fullPath),
 		Description:     photo.Description,
 		Tags:            tagItems,
 		SizeBytes:       photo.SizeBytes,

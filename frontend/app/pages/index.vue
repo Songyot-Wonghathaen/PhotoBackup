@@ -611,6 +611,39 @@
         <button class="btn-success-ok" @click="showSuccessModal = false">ตกลง</button>
       </div>
     </div>
+
+    <!-- Move Confirmation Modal (Cross-platform for macOS and Windows) -->
+    <div v-if="showMoveConfirmModal && pendingMoveConfig" class="modal-backdrop" @click.self="cancelMoveAction">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title-row">
+            <span class="modal-icon">⚠️</span>
+            <div>
+              <h3>ยืนยันการย้ายรูปภาพ</h3>
+              <p class="modal-subtitle">ไฟล์ต้นทางจะถูกลบออกหลังจากย้ายสำเร็จ</p>
+            </div>
+          </div>
+          <button class="btn-close" @click="cancelMoveAction">✕</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size: 14px; color: #374151; line-height: 1.6; margin: 0 0 12px 0;">
+            คุณแน่ใจหรือไม่ว่าต้องการ <strong>ย้ายรูปภาพจำนวน {{ pendingMoveConfig.count }} ไฟล์</strong> ไปยังปลายทาง?
+          </p>
+          <div style="background: #FEF3C7; border: 1px solid #FCD34D; border-radius: 8px; padding: 10px 14px; color: #92400E; font-size: 13px; line-height: 1.5;">
+            ⚠️ <strong>คำเตือน:</strong> ไฟล์ในโฟลเดอร์ต้นทางจะถูกลบออกทันทีเมื่อย้ายสำเร็จ (หากต้องการเก็บไฟล์ต้นทางไว้ กรุณาใช้ปุ่ม <strong>"สำรอง"</strong>)
+          </div>
+        </div>
+        <div class="modal-footer" style="display: flex; gap: 8px; justify-content: flex-end;">
+          <button class="btn-secondary" @click="cancelMoveAction">ยกเลิก</button>
+          <button 
+            style="background: #D97706; color: #FFF; border: none; padding: 6px 18px; border-radius: 8px; font-weight: 600; cursor: pointer;"
+            @click="confirmMoveAction"
+          >
+            ยืนยันการย้าย
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -648,6 +681,10 @@ const {
   showDestFilesModal,
   showAiResultsModal,
   showSuccessModal,
+  showMoveConfirmModal,
+  pendingMoveConfig,
+  confirmMoveAction,
+  cancelMoveAction,
   successMessage,
   analyzedPhotosList,
   aiError,
@@ -720,15 +757,13 @@ function handleMoveAll() {
 }
 
 function handleCancelAnalysis() {
-  if (confirm('คุณต้องการยกเลิกการวิเคราะห์ภาพด้วย AI หรือไม่?')) {
-    // Tell Go to stop the background goroutine
-    if (typeof (window as any)?.go?.main?.App?.CancelAnalysis === 'function') {
-      (window as any).go.main.App.CancelAnalysis()
-    }
-    stopLiveTimer()
-    isAnalyzing.value = false
-    aiProgress.value = { current: 0, total: 0, filename: '' }
+  // Tell Go to stop the background goroutine directly (safe on macOS without blocking confirm)
+  if (typeof (window as any)?.go?.main?.App?.CancelAnalysis === 'function') {
+    (window as any).go.main.App.CancelAnalysis()
   }
+  stopLiveTimer()
+  isAnalyzing.value = false
+  aiProgress.value = { current: 0, total: 0, filename: '' }
 }
 
 // Art gradients and curves matching Figma's design

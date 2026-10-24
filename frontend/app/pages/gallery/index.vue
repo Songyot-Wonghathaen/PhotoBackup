@@ -16,7 +16,7 @@
           <span>AI วิเคราะห์แล้ว {{ Math.max(aiProgress.current, analyzedTotal) }}/{{ total }} รูป</span>
         </div>
         <div v-else-if="total > 0 && analyzedTotal >= total" class="header-count-pill pill-ai-done">
-          <span>✨ AI วิเคราะห์ครบแล้ว {{ total }}/{{ total }}</span>
+          <span>AI วิเคราะห์ครบแล้ว {{ total }}/{{ total }}</span>
         </div>
 
         <div class="header-count-pill">

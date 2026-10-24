@@ -20,6 +20,8 @@ const showDestFilesModal = ref(false)
 const showAiResultsModal = ref(false)
 const showSuccessModal = ref(false)
 const successMessage = ref('')
+const showMoveConfirmModal = ref(false)
+const pendingMoveConfig = ref<{ isAll: boolean; count: number } | null>(null)
 
 const isAnalyzing = ref(false)
 const aiProgress = ref({ current: 0, total: 0, filename: '' })
@@ -432,29 +434,48 @@ export function useBackup() {
   async function executeTransfer(isMove: boolean, isAll: boolean) {
     const actionName = isMove ? 'ย้าย' : 'สำรอง'
     if (!sourcePath.value) {
-      alert(`กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการ${actionName}ไฟล์!`)
+      aiError.value = `กรุณาเลือกโฟลเดอร์ต้นทาง (Flash Drive / โทรศัพท์) ก่อนทำการ${actionName}ไฟล์!`
       return
     }
     if (!destPath.value) {
-      alert(`กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการ${actionName}ไฟล์!`)
+      aiError.value = `กรุณาเลือกโฟลเดอร์ปลายทางสำหรับเก็บภาพก่อนทำการ${actionName}ไฟล์!`
       return
     }
     if (!isAll && selectedFiles.value.length === 0) {
-      alert(`กรุณาเลือกรูปภาพอย่างน้อย 1 ไฟล์ที่ต้องการ${actionName}!`)
+      aiError.value = `กรุณาเลือกรูปภาพอย่างน้อย 1 ไฟล์ที่ต้องการ${actionName}!`
       return
     }
     if (isAll && sourceFiles.value.length === 0) {
-      alert(`ไม่พบรูปภาพในโฟลเดอร์ต้นทางที่จะ${actionName}!`)
+      aiError.value = `ไม่พบรูปภาพในโฟลเดอร์ต้นทางที่จะ${actionName}!`
       return
     }
 
     if (isMove) {
-      const countText = isAll ? `ทั้งหมด ${sourceFiles.value.length}` : `${selectedFiles.value.length}`
-      if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการ "ย้าย" รูปภาพจำนวน ${countText} ไฟล์ไปยังปลายทาง?\n(ไฟล์ต้นทางในโฟลเดอร์ต้นทางจะถูกลบออกหลังจากย้ายสำเร็จ)`)) {
-        return
-      }
+      const count = isAll ? sourceFiles.value.length : selectedFiles.value.length
+      pendingMoveConfig.value = { isAll, count }
+      showMoveConfirmModal.value = true
+      return
     }
 
+    doEnqueueTransfer(false, isAll)
+  }
+
+  function confirmMoveAction() {
+    if (pendingMoveConfig.value) {
+      const { isAll } = pendingMoveConfig.value
+      pendingMoveConfig.value = null
+      showMoveConfirmModal.value = false
+      doEnqueueTransfer(true, isAll)
+    }
+  }
+
+  function cancelMoveAction() {
+    pendingMoveConfig.value = null
+    showMoveConfirmModal.value = false
+  }
+
+  function doEnqueueTransfer(isMove: boolean, isAll: boolean) {
+    const actionName = isMove ? 'ย้าย' : 'สำรอง'
     // Capture selected files and clear selection immediately so user can select more photos!
     const targetsToRun = isAll ? [] : [...selectedFiles.value]
     const count = isAll ? sourceFiles.value.length : targetsToRun.length
@@ -640,6 +661,10 @@ export function useBackup() {
     showDestFilesModal,
     showAiResultsModal,
     showSuccessModal,
+    showMoveConfirmModal,
+    pendingMoveConfig,
+    confirmMoveAction,
+    cancelMoveAction,
     successMessage,
     isAnalyzing,
     aiProgress,

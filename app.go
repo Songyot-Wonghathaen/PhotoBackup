@@ -135,7 +135,6 @@ func (a *App) DeletePhotosFromDest(destPath string, targets []string, isAll bool
 	return a.backupService.DeleteFromDest(destPath, targets, isAll)
 }
 
-
 // GetFullPhotoBase64 returns base64 data URL of the original full-size photo
 func (a *App) GetFullPhotoBase64(fullPath string) (string, error) {
 	bytes, err := os.ReadFile(fullPath)
@@ -255,4 +254,3 @@ func (a *App) UpdateSystemSettings(autoAnalyze bool, primaryModel string, duplic
 func (a *App) ResetAiQuotaCooldowns() (*dto.AppSettingsDTO, error) {
 	return a.backupService.ResetAiQuotaCooldowns()
 }
-

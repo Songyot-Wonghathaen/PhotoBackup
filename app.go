@@ -9,6 +9,9 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -92,7 +95,12 @@ func (a *App) CheckIntegrity(destPath string) (service.IntegrityResult, error) {
 	return a.backupService.CheckIntegrity(destPath)
 }
 
-// MovePhotos moves selected files or all files to destination (Feature 6, 7, 8, 9, 11)
+// BackupPhotos copies selected files or all files to destination without removing source (Feature 6: Backup)
+func (a *App) BackupPhotos(targets []string, isAll bool) (service.MoveSummary, error) {
+	return a.backupService.Backup(targets, isAll)
+}
+
+// MovePhotos moves selected files or all files to destination and removes source (Feature 6: Move)
 func (a *App) MovePhotos(targets []string, isAll bool) (service.MoveSummary, error) {
 	return a.backupService.Move(targets, isAll)
 }
@@ -112,9 +120,42 @@ func (a *App) ListDBPhotos(destPath string) ([]*modelGen.Photo, error) {
 	return a.backupService.ListDB(destPath)
 }
 
+// ListAllDBPhotos lists ALL photos recorded in database for destination (active, missing, deleted) for Feature 20, 22, 24
+func (a *App) ListAllDBPhotos(destPath string) ([]*modelGen.Photo, error) {
+	return a.backupService.ListAllDB(destPath)
+}
+
 // DeletePhotos deletes files from destination and marks status as 'deleted' in DB (Feature 23 & 25)
 func (a *App) DeletePhotos(targets []string, isAll bool) (int, error) {
 	return a.backupService.Delete(targets, isAll)
+}
+
+// DeletePhotosFromDest deletes files from a specific destination and marks status as 'deleted' in DB (Feature 23 & 25)
+func (a *App) DeletePhotosFromDest(destPath string, targets []string, isAll bool) (int, error) {
+	return a.backupService.DeleteFromDest(destPath, targets, isAll)
+}
+
+// GetFullPhotoBase64 returns base64 data URL of the original full-size photo
+func (a *App) GetFullPhotoBase64(fullPath string) (string, error) {
+	bytes, err := os.ReadFile(fullPath)
+	if err != nil {
+		return "", err
+	}
+	mimeType := "image/jpeg"
+	ext := strings.ToLower(filepath.Ext(fullPath))
+	switch ext {
+	case ".png":
+		mimeType = "image/png"
+	case ".gif":
+		mimeType = "image/gif"
+	case ".webp":
+		mimeType = "image/webp"
+	case ".svg":
+		mimeType = "image/svg+xml"
+	case ".bmp":
+		mimeType = "image/bmp"
+	}
+	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(bytes)), nil
 }
 
 // GetPhotoThumbnail returns base64 data URL for a single photo
@@ -176,3 +217,46 @@ func (a *App) SearchPhotosByTag(dest string, tagName string, limit int, offset i
 func (a *App) GetTagsWithCount(dest string) ([]repository.TagCount, error) {
 	return a.backupService.GetTagsWithCount(dest)
 }
+
+// CancelAnalysis stops any running background AI analysis immediately
+func (a *App) CancelAnalysis() {
+	if a.backupService != nil {
+		a.backupService.CancelAnalysis()
+	}
+}
+
+// GetAppSettings returns current system settings and multi-project API pool status
+func (a *App) GetAppSettings() (*dto.AppSettingsDTO, error) {
+	return a.backupService.GetAppSettings()
+}
+
+// SaveProjectApiKey adds a new project + API key, or updates an existing project with a new API key
+func (a *App) SaveProjectApiKey(projectID, projectName, projectNumber, apiKey string) (*dto.AppSettingsDTO, error) {
+	return a.backupService.SaveProjectApiKey(projectID, projectName, projectNumber, apiKey)
+}
+
+// ToggleProjectApiKey enables or disables a specific project's API key in the pool
+func (a *App) ToggleProjectApiKey(projectID string, enabled bool) (*dto.AppSettingsDTO, error) {
+	return a.backupService.ToggleProjectApiKey(projectID, enabled)
+}
+
+// DeleteProjectApiKey deletes a project entry from the pool
+func (a *App) DeleteProjectApiKey(projectID string) (*dto.AppSettingsDTO, error) {
+	return a.backupService.DeleteProjectApiKey(projectID)
+}
+
+// UpdateSystemSettings updates general backup and AI settings
+func (a *App) UpdateSystemSettings(autoAnalyze bool, primaryModel string, duplicateGuard bool, copyWorkers int) (*dto.AppSettingsDTO, error) {
+	return a.backupService.UpdateSystemSettings(autoAnalyze, primaryModel, duplicateGuard, copyWorkers)
+}
+
+// ResetAiQuotaCooldowns clears all temporary RPM and daily RPD cooldowns across all projects
+func (a *App) ResetAiQuotaCooldowns() (*dto.AppSettingsDTO, error) {
+	return a.backupService.ResetAiQuotaCooldowns()
+}
+
+// RestoreDefaultProjects restores the 10 built-in default projects and API keys
+func (a *App) RestoreDefaultProjects() (*dto.AppSettingsDTO, error) {
+	return a.backupService.RestoreDefaultProjects()
+}
+

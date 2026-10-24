@@ -10,6 +10,10 @@ frontend/dist/*
 .env
 .env.*
 !.env.example
+api google.txt
+*ai_settings.json
+*ai_model_quota.json
+service/database/
 
 *.exe
 *.db-shm

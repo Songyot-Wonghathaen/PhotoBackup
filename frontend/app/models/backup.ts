@@ -34,4 +34,30 @@ export interface IntegrityResult {
   matched_count: number
   is_exact_match: boolean
   alert_message?: string
+  duration_ms?: number
+  duration_formatted?: string
 }
+
+export interface PhotoHistoryItem {
+  id: number
+  name: string
+  size: string
+  size_bytes: number
+  date: string
+  raw_date?: string
+  ai: string
+  description: string
+  tags: string[]
+  status: 'passed' | 'missing' | 'deleted'
+  gradient: string
+  full_path?: string
+  sha256?: string
+}
+
+export interface HistoryStats {
+  total: number
+  passed: number
+  missing: number
+  deleted: number
+}
+

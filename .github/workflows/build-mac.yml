@@ -1,0 +1,137 @@
+name: Build & Release (macOS & Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+      - build-mac
+      - build-windows
+      - featureB
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Wails CLI
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: |
+          npm install --include=optional
+
+      - name: Generate static frontend
+        working-directory: ./frontend
+        run: |
+          npm run generate
+
+      - name: Build macOS Universal Application (.app)
+        run: |
+          wails build -platform darwin/universal -clean -s
+
+      - name: Package macOS App into Zip
+        run: |
+          cd build/bin
+          ditto -c -k --sequesterRsrc --keepParent PhotoVault.app PhotoVault-macOS-Universal.zip
+
+      - name: Upload macOS Application Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhotoVault-macOS-Universal
+          path: build/bin/PhotoVault-macOS-Universal.zip
+          if-no-files-found: error
+
+      - name: Publish macOS Build to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: "PhotoVault v1.0.0 (macOS & Windows)"
+          body: |
+            ## 📥 ดาวน์โหลดโปรแกรม PhotoVault (macOS & Windows)
+
+            ### 🍎 สำหรับ macOS (Apple Silicon M1/M2/M3/M4 & Intel)
+            - ดาวน์โหลดไฟล์ **`PhotoVault-macOS-Universal.zip`** แล้วแตกไฟล์จะได้ `PhotoVault.app`
+            - **วิธีเปิดใช้งานครั้งแรกบน Mac:** หากขึ้นแจ้งเตือนความปลอดภัย ให้เปิด **Terminal** แล้วรันคำสั่ง:
+              ```bash
+              xattr -cr /ทางไปโฟลเดอร์ที่วางไฟล์/PhotoVault.app
+              ```
+
+            ### 🪟 สำหรับ Windows (64-bit)
+            - ดาวน์โหลดไฟล์ **`PhotoVault.exe`** แล้วดับเบิลคลิกเปิดใช้งานได้ทันที
+          files: build/bin/PhotoVault-macOS-Universal.zip
+          prerelease: false
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Wails CLI
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          echo "$(go env GOPATH)\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: |
+          npm install --include=optional
+
+      - name: Generate static frontend
+        working-directory: ./frontend
+        run: |
+          npm run generate
+
+      - name: Build Windows Application (.exe)
+        run: |
+          wails build -platform windows/amd64 -clean -s -webview2 embed
+
+      - name: Upload Windows Executable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhotoVault-Windows-amd64
+          path: build/bin/PhotoVault.exe
+          if-no-files-found: error
+
+      - name: Publish Windows Build to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: "PhotoVault v1.0.0 (macOS & Windows)"
+          files: build/bin/PhotoVault.exe
+          prerelease: false

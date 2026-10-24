@@ -267,3 +267,67 @@ func TestDeleteOperations(t *testing.T) {
 		t.Errorf("expected DB status to be 'deleted', got %s", allPhotos[0].Status)
 	}
 }
+
+// Test 6: Delete All and History Listing (Feature 20, 24, 25)
+func TestDeleteAllAndHistoryList(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	destDir, _ := os.MkdirTemp("", "dest_del_all_*")
+	defer os.RemoveAll(destDir)
+
+	_ = os.WriteFile(filepath.Join(destDir, "f1.jpg"), []byte("d1"), 0644)
+	_ = os.WriteFile(filepath.Join(destDir, "f2.jpg"), []byte("d2"), 0644)
+
+	repo := repository.NewPhotoRepository(db)
+	svc := NewBackupService(repo)
+	_, _ = svc.SetDest(destDir)
+
+	p1 := &model.Photo{
+		DestinationPath: destDir,
+		FileName:        "f1.jpg",
+		RelPath:         "f1.jpg",
+		SizeBytes:       2,
+		Sha256:          "h1",
+		BackedUpAt:      time.Now(),
+		Status:          "active",
+	}
+	p2 := &model.Photo{
+		DestinationPath: destDir,
+		FileName:        "f2.jpg",
+		RelPath:         "f2.jpg",
+		SizeBytes:       2,
+		Sha256:          "h2",
+		BackedUpAt:      time.Now(),
+		Status:          "active",
+	}
+	_ = repo.AddPhoto(context.Background(), p1)
+	_ = repo.AddPhoto(context.Background(), p2)
+
+	// ListAllDB should show 2 active
+	all, err := svc.ListAllDB(destDir)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("expected 2 photos in ListAllDB, got %d (err: %v)", len(all), err)
+	}
+
+	// Delete All
+	count, err := svc.Delete(nil, true)
+	if err != nil {
+		t.Fatalf("Delete all failed: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2 files deleted, got %d", count)
+	}
+
+	// Verify all records in ListAllDB have status 'deleted'
+	allAfter, err := svc.ListAllDB(destDir)
+	if err != nil || len(allAfter) != 2 {
+		t.Fatalf("expected 2 photos preserved in DB, got %d", len(allAfter))
+	}
+	for _, p := range allAfter {
+		if p.Status != "deleted" {
+			t.Errorf("expected status 'deleted', got %s", p.Status)
+		}
+	}
+}
+

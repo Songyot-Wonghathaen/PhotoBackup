@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - build-mac
+      - develop
 
 jobs:
   build-mac:
